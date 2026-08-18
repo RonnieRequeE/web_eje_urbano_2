@@ -409,7 +409,7 @@ export default function App() {
       <header className="px-4 md:px-8 py-4">
         <nav className="max-w-7xl mx-auto glassmorphism rounded-2xl px-6 py-4 flex items-center justify-between">
           <a href="#" onClick={() => setCurrentPage('home')} className="flex items-center">
-            <img src="/images/image.png" alt="Eje Urbano Logo" className="h-10 w-auto object-contain rounded-xl" />
+            <img src="images/image.png" alt="Eje Urbano Logo" className="h-10 w-auto object-contain rounded-xl" />
           </a>
 
           {/* Links for visitors */}
@@ -479,7 +479,7 @@ export default function App() {
                       <div className="w-1.5 h-1.5 rounded-full bg-slate-950"></div>
                     </div>
                     <div className="flex-1 flex flex-col select-none relative bg-[#0F172A] overflow-hidden">
-                      <img src="/images/extracted_img_3.png" alt="App Screenshot" className="w-full h-full object-cover" />
+                      <img src="images/extracted_img_3.png" alt="App Screenshot" className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent opacity-40 pointer-events-none z-20"></div>
                     </div>
                   </div>
@@ -970,6 +970,7 @@ export default function App() {
                       <!DOCTYPE html>
                       <html>
                       <head>
+                        <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
                         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                         <style>
@@ -1437,7 +1438,7 @@ export default function App() {
       <footer className="max-w-7xl mx-auto px-4 md:px-8 py-12 border-t border-white/5 text-center text-sm text-gray-500 w-full mt-auto">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <button onClick={() => setCurrentPage('home')} className="flex items-center gap-2 font-bold text-white">
-            <img src="/images/image.png" alt="Logo" className="w-6 h-6 object-contain rounded-lg" />
+            <img src="images/image.png" alt="Logo" className="w-6 h-6 object-contain rounded-lg" />
             <span>Eje Urbano</span>
           </button>
           <p>&copy; {new Date().getFullYear()} Eje Urbano. Todos los derechos reservados.</p>
