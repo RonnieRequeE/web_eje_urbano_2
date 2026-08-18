@@ -55,6 +55,9 @@ export default function App() {
   const [mapTheme, setMapTheme] = useState('dark'); // 'dark' or 'light'
   const [selectedAlerta, setSelectedAlerta] = useState(null); // focused alert coordinates {lat, lng, id}
   const [activeFeatureModal, setActiveFeatureModal] = useState(null); // 'sos' or 'map' or null
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [lockUntil, setLockUntil] = useState(null);
+  const [requestTimestamps, setRequestTimestamps] = useState([]); // for rate limiting / flood protection
 
   // Check auth status
   useEffect(() => {
@@ -243,13 +246,47 @@ export default function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
+
+    // --- SECURITY 1: Flood Protection (Saturación) ---
+    const now = Date.now();
+    const activeRequests = requestTimestamps.filter(timestamp => now - timestamp < 10000); // last 10 seconds
+    if (activeRequests.length >= 10) {
+      setLoginError('Saturación de peticiones detectada. Por favor, espera unos segundos.');
+      return;
+    }
+    setRequestTimestamps([...activeRequests, now]);
+
+    // --- SECURITY 2: Brute Force Protection (Intentos) ---
+    if (lockUntil && now < lockUntil) {
+      const remainingSeconds = Math.ceil((lockUntil - now) / 1000);
+      const remainingMinutes = Math.ceil(remainingSeconds / 60);
+      setLoginError(`Demasiados intentos fallidos. Inténtalo de nuevo en ${remainingMinutes} minuto(s).`);
+      return;
+    }
+
     setFormLoading(true);
 
+    // --- SECURITY 3: SQL Injection Protection (Sanitización) ---
+    // Remove characters often used in classic SQL injection attempts for fields
+    const sanitizedEmail = email.replace(/['";\-/\*]/g, '').trim();
+    
+    // Validate email pattern to ensure safe input
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(sanitizedEmail)) {
+      setLoginError('Formato de correo electrónico inválido o malicioso.');
+      setFormLoading(false);
+      return;
+    }
+
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email: sanitizedEmail, 
+        password: password 
+      });
+      
       if (error) throw error;
       
-      // Verify role in usuarios table
+      // Verify role in usuarios table using parameter bindings (Supabase JS auto-binds params safely)
       const { data: userData, error: userError } = await supabase
         .from('usuarios')
         .select('rol')
@@ -261,10 +298,22 @@ export default function App() {
         throw new Error('No tienes permisos de administrador para ingresar al panel.');
       }
 
+      // Success: Reset brute force tracker
+      setLoginAttempts(0);
+      setLockUntil(null);
       setUser(data.user);
       setCurrentPage('dashboard');
     } catch (err) {
-      setLoginError(err.message || 'Error al iniciar sesión');
+      const newAttempts = loginAttempts + 1;
+      setLoginAttempts(newAttempts);
+
+      if (newAttempts >= 3) {
+        const lockTime = now + 5 * 60 * 1000; // 5 minutes lock
+        setLockUntil(lockTime);
+        setLoginError('Demasiados intentos fallidos. Tu cuenta ha sido bloqueada por 5 minutos.');
+      } else {
+        setLoginError(`${err.message || 'Error al iniciar sesión'}. Intentos fallidos: ${newAttempts}/3`);
+      }
     } finally {
       setFormLoading(false);
     }
