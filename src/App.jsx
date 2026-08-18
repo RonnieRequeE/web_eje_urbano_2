@@ -458,7 +458,7 @@ export default function App() {
 
         {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden absolute top-full left-4 right-4 mt-2 glassmorphism rounded-2xl p-6 border border-white/5 flex flex-col gap-4 shadow-2xl animate-fade-in z-[1000]">
+          <div className="md:hidden absolute top-full left-4 right-4 mt-2 bg-[#0F172A]/95 border border-white/10 rounded-2xl p-6 flex flex-col gap-4 shadow-2xl animate-fade-in z-[1000] backdrop-blur-lg">
             {currentPage !== 'dashboard' && (
               <div className="flex flex-col gap-3">
                 <button onClick={() => { setCurrentPage('features'); setMobileMenuOpen(false); }} className={`text-left py-2 px-4 rounded-xl hover:bg-white/5 text-sm font-medium ${currentPage === 'features' ? 'text-[#00E5FF] bg-white/5' : 'text-gray-300'}`}>Funcionalidades</button>
@@ -494,17 +494,17 @@ export default function App() {
         
         {/* PAGE: HOME */}
         {currentPage === 'home' && (
-          <div className="max-w-7xl mx-auto px-4 md:px-8 pt-12 pb-24 md:pt-20">
+          <div className="max-w-7xl mx-auto px-4 md:px-8 pt-6 pb-24 md:pt-20">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
               <div className="lg:col-span-7 flex flex-col justify-center text-center lg:text-left">
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-sky-950/60 border border-[#00E5FF]/30 text-[#00E5FF] text-xs font-semibold self-center lg:self-start mb-6">
                   <span className="w-2 h-2 rounded-full bg-[#00E5FF] animate-ping"></span>
                   Ecosistema Activo de Seguridad Vecinal
                 </div>
-                <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight title-gradient leading-tight mb-6">
+                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight title-gradient leading-tight mb-6">
                   Seguridad comunitaria inteligente en tus manos
                 </h1>
-                <p className="text-lg text-gray-400 leading-relaxed max-w-xl mx-auto lg:mx-0 mb-8">
+                <p className="text-base sm:text-lg text-gray-400 leading-relaxed max-w-xl mx-auto lg:mx-0 mb-8">
                   Eje Urbano unifica una potente aplicación móvil para vecinos con botones de pánico físicos y sirenas sonoras ESP32. Protege a tu comunidad en tiempo real.
                 </p>
                 <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
@@ -519,7 +519,7 @@ export default function App() {
               </div>
 
               <div className="lg:col-span-5 flex justify-center items-center">
-                <div className="relative w-[286px] h-[620px] rounded-[34px] p-[5px] bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 glow-cyan shadow-2xl overflow-hidden">
+                <div className="relative w-[280px] sm:w-[286px] h-[580px] sm:h-[620px] rounded-[34px] p-[5px] bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 glow-cyan shadow-2xl overflow-hidden">
                   <div className="w-full h-full rounded-[30px] bg-black relative overflow-hidden flex flex-col">
                     <div className="absolute top-2.5 left-1/2 transform -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-black border border-slate-900 z-30 flex items-center justify-center">
                       <div className="w-1.5 h-1.5 rounded-full bg-slate-950"></div>
@@ -534,14 +534,14 @@ export default function App() {
             </div>
 
             {/* Quick Navigation Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-20 border-t border-white/5 pt-16">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mt-16 md:mt-20 border-t border-white/5 pt-16">
               <button onClick={() => setCurrentPage('features')} className="p-6 rounded-2xl glass-card text-left flex flex-col justify-between group">
                 <div>
                   <span className="w-10 h-10 rounded-lg bg-sky-950/60 text-[#00E5FF] flex items-center justify-center mb-4 border border-[#00E5FF]/20 group-hover:scale-110 transition-transform">
                     💡
                   </span>
                   <h3 className="text-lg font-bold text-white mb-2">Funcionalidades</h3>
-                  <p class="text-sm text-gray-400 leading-relaxed">Conoce el sistema de geolocalización, chat y alertas SOS comunitarias.</p>
+                  <p className="text-sm text-gray-400 leading-relaxed">Conoce el sistema de geolocalización, chat y alertas SOS comunitarias.</p>
                 </div>
                 <span className="text-xs text-[#00E5FF] font-semibold mt-6 inline-flex items-center gap-1 group-hover:underline">
                   Ver más
@@ -555,7 +555,7 @@ export default function App() {
                     📖
                   </span>
                   <h3 className="text-lg font-bold text-white mb-2">Manual de Usuario</h3>
-                  <p class="text-sm text-gray-400 leading-relaxed">Guía paso a paso sobre el funcionamiento operativo y flujos de usuario.</p>
+                  <p className="text-sm text-gray-400 leading-relaxed">Guía paso a paso sobre el funcionamiento operativo y flujos de usuario.</p>
                 </div>
                 <span className="text-xs text-[#00E5FF] font-semibold mt-6 inline-flex items-center gap-1 group-hover:underline">
                   Leer manual
@@ -569,7 +569,7 @@ export default function App() {
                     🔌
                   </span>
                   <h3 className="text-lg font-bold text-white mb-2">Hardware IoT</h3>
-                  <p class="text-sm text-gray-400 leading-relaxed">Descubre la sincronización nativa con sirenas y botones ESP32.</p>
+                  <p className="text-sm text-gray-400 leading-relaxed">Descubre la sincronización nativa con sirenas y botones ESP32.</p>
                 </div>
                 <span className="text-xs text-[#00E5FF] font-semibold mt-6 inline-flex items-center gap-1 group-hover:underline">
                   Ver integración
@@ -583,7 +583,7 @@ export default function App() {
                     📥
                   </span>
                   <h3 className="text-lg font-bold text-white mb-2">Descargas</h3>
-                  <p class="text-sm text-gray-400 leading-relaxed">Obtén el archivo APK de instalación y los recursos necesarios.</p>
+                  <p className="text-sm text-gray-400 leading-relaxed">Obtén el archivo APK de instalación y los recursos necesarios.</p>
                 </div>
                 <span className="text-xs text-[#00E5FF] font-semibold mt-6 inline-flex items-center gap-1 group-hover:underline">
                   Ir a descargas
@@ -596,33 +596,33 @@ export default function App() {
 
         {/* PAGE: FEATURES */}
         {currentPage === 'features' && (
-          <section className="max-w-7xl mx-auto px-4 md:px-8 py-16 animate-fade-in">
-            <div className="text-center max-w-2xl mx-auto mb-16">
+          <section className="max-w-7xl mx-auto px-4 md:px-8 py-12 md:py-16 animate-fade-in">
+            <div className="text-center max-w-2xl mx-auto mb-12 md:mb-16">
               <h1 className="text-emerald-400 text-sm font-bold tracking-widest uppercase mb-3">Seguridad Avanzada</h1>
-              <p className="text-4xl font-extrabold tracking-tight text-white leading-tight">
+              <p className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
                 Protección comunitaria en cada segundo
               </p>
-              <p className="text-gray-400 mt-4 leading-relaxed">
+              <p className="text-gray-400 mt-4 leading-relaxed text-sm sm:text-base">
                 Eje Urbano combina geolocalización, hardware IoT y comunicación directa para ofrecer respuesta inmediata ante cualquier peligro. Haz clic en las tarjetas para conocer más detalles.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 mb-16">
               
               {/* SOS Card */}
               <div 
                 onClick={() => setActiveFeatureModal('sos')}
-                className="rounded-3xl p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-red-500/40 hover:shadow-red-500/5 group"
+                className="rounded-3xl p-6 sm:p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-red-500/40 hover:shadow-red-500/5 group"
               >
                 <div>
                   <span className="w-14 h-14 rounded-2xl bg-red-950/60 text-red-400 border border-red-500/20 flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                     <AlertTriangle className="w-7 h-7" />
                   </span>
-                  <h3 className="text-2xl font-bold text-white mb-4 flex items-center justify-between">
+                  <h3 className="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center justify-between gap-2">
                     Alertas SOS Comunitarias
-                    <span className="text-xs text-red-400 font-semibold px-2.5 py-0.5 rounded-full bg-red-950/50 border border-red-500/20">Ver Detalle</span>
+                    <span className="text-[10px] text-red-400 font-semibold px-2.5 py-0.5 rounded-full bg-red-950/50 border border-red-500/20 whitespace-nowrap">Ver Detalle</span>
                   </h3>
-                  <p className="text-gray-400 leading-relaxed">
+                  <p className="text-gray-400 leading-relaxed text-sm">
                     Envía notificaciones de emergencia con un solo toque. Captura tus coordenadas GPS reales y activa al instante las alertas sonoras y visuales en los celulares de todos los vecinos y administradores dentro de tu comunidad.
                   </p>
                 </div>
@@ -635,17 +635,17 @@ export default function App() {
               {/* Map Card */}
               <div 
                 onClick={() => setActiveFeatureModal('map')}
-                className="rounded-3xl p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-sky-500/40 hover:shadow-sky-500/5 group"
+                className="rounded-3xl p-6 sm:p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-sky-500/40 hover:shadow-sky-500/5 group"
               >
                 <div>
                   <span className="w-14 h-14 rounded-2xl bg-sky-950/60 text-sky-400 border border-sky-500/20 flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                     <MapPin className="w-7 h-7" />
                   </span>
-                  <h3 className="text-2xl font-bold text-white mb-4 flex items-center justify-between">
+                  <h3 className="text-xl sm:text-2xl font-bold text-white mb-4 flex items-center justify-between gap-2">
                     Mapas en Tiempo Real
-                    <span className="text-xs text-[#00E5FF] font-semibold px-2.5 py-0.5 rounded-full bg-sky-950/50 border border-sky-500/20">Ver Detalle</span>
+                    <span className="text-[10px] text-[#00E5FF] font-semibold px-2.5 py-0.5 rounded-full bg-sky-950/50 border border-sky-500/20 whitespace-nowrap">Ver Detalle</span>
                   </h3>
-                  <p className="text-gray-400 leading-relaxed">
+                  <p className="text-gray-400 leading-relaxed text-sm">
                     Visualización dinámica de la ubicación de los incidentes en Google Maps. Ubica exactamente de dónde proviene la señal de auxilio para acudir a prestar asistencia de inmediato.
                   </p>
                 </div>
@@ -659,8 +659,8 @@ export default function App() {
 
             {/* MODAL: SOS DETAILS */}
             {activeFeatureModal === 'sos' && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
-                <div className="glassmorphism border border-red-500/20 max-w-2xl w-full rounded-3xl p-8 shadow-2xl relative">
+              <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
+                <div className="bg-[#0f172a] border border-red-500/20 max-w-2xl w-full rounded-3xl p-6 sm:p-8 shadow-2xl relative">
                   <button 
                     onClick={() => setActiveFeatureModal(null)}
                     className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-2"
@@ -672,15 +672,15 @@ export default function App() {
                       <AlertTriangle className="w-6 h-6" />
                     </span>
                     <div>
-                      <h3 className="text-2xl font-bold text-white">Detalle de Alertas SOS</h3>
+                      <h3 className="text-xl sm:text-2xl font-bold text-white">Detalle de Alertas SOS</h3>
                       <p className="text-xs text-red-400 font-semibold uppercase tracking-wider">Ecosistema de Respuesta Rápida</p>
                     </div>
                   </div>
-                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[400px] overflow-y-auto pr-2">
+                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[300px] sm:max-h-[400px] overflow-y-auto pr-2">
                     <p>
                       El sistema de <strong>Alertas SOS de Eje Urbano</strong> te permite notificar situaciones críticas a tu comunidad y contactos de confianza al instante:
                     </p>
-                    <ul className="list-disc pl-5 space-y-2 text-gray-400">
+                    <ul className="list-disc pl-5 space-y-2 text-gray-400 text-xs sm:text-sm">
                       <li><strong className="text-white">Botón Físico de Emergencia:</strong> Puedes activar una alerta SOS silenciosa de forma discreta manteniendo presionado el botón de **subir volumen** de tu teléfono por 5 segundos o más, sin necesidad de encender la pantalla.</li>
                       <li><strong className="text-white">Tipos de Alerta Personalizados:</strong> Clasifica tu emergencia en 4 categorías: <em>Pánico (SOS), Robo, Asistencia Médica o Incendio</em>, para recibir la ayuda correspondiente de tus vecinos.</li>
                       <li><strong className="text-white">Alarmas Audibles Instantáneas:</strong> Envía notificaciones de alta prioridad a tus contactos de confianza que sonarán inmediatamente en sus teléfonos, incluso si los tienen en modo silencioso.</li>
@@ -690,7 +690,7 @@ export default function App() {
                   <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
                     <button 
                       onClick={() => setActiveFeatureModal(null)}
-                      className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all"
+                      className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all w-full sm:w-auto"
                     >
                       Entendido
                     </button>
@@ -701,8 +701,8 @@ export default function App() {
 
             {/* MODAL: MAP DETAILS */}
             {activeFeatureModal === 'map' && (
-              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
-                <div className="glassmorphism border border-sky-500/20 max-w-2xl w-full rounded-3xl p-8 shadow-2xl relative">
+              <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
+                <div className="bg-[#0f172a] border border-sky-500/20 max-w-2xl w-full rounded-3xl p-6 sm:p-8 shadow-2xl relative">
                   <button 
                     onClick={() => setActiveFeatureModal(null)}
                     className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-2"
@@ -714,15 +714,15 @@ export default function App() {
                       <MapPin className="w-6 h-6" />
                     </span>
                     <div>
-                      <h3 className="text-2xl font-bold text-white">Detalle de Mapas y Geolocalización</h3>
+                      <h3 className="text-xl sm:text-2xl font-bold text-white">Detalle de Mapas y Geolocalización</h3>
                       <p className="text-xs text-[#00E5FF] font-semibold uppercase tracking-wider">Monitoreo y Trayecto Seguro</p>
                     </div>
                   </div>
-                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[400px] overflow-y-auto pr-2">
+                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[300px] sm:max-h-[400px] overflow-y-auto pr-2">
                     <p>
                       El sistema de geolocalización y mapas dinámicos está diseñado para cuidarte a ti y a tu familia en sus traslados diarios:
                     </p>
-                    <ul className="list-disc pl-5 space-y-2 text-gray-400">
+                    <ul className="list-disc pl-5 space-y-2 text-gray-400 text-xs sm:text-sm">
                       <li><strong className="text-white">Trayecto Seguro ("Acompáñame a casa"):</strong> Te permite definir un tiempo estimado para tu recorrido. Si no marcas que has llegado a salvo y el temporizador expira, tus contactos de confianza recibirán automáticamente una alerta de SOS con tu última ubicación.</li>
                       <li><strong className="text-white">Privacidad Respetada:</strong> La ubicación de tus trayectos normales es confidencial y solo la pueden ver los contactos de confianza que tú elijas. Nadie más, ni los administradores del barrio, pueden ver tus rutas rutinarias.</li>
                       <li><strong className="text-white">Monitoreo Activo de Emergencias:</strong> Cuando activas una alerta de SOS, tu ubicación en el mapa se actualiza continuamente para que tus vecinos puedan ubicarte y acudir a ayudarte rápidamente.</li>
@@ -732,7 +732,7 @@ export default function App() {
                   <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
                     <button 
                       onClick={() => setActiveFeatureModal(null)}
-                      className="px-6 py-2.5 rounded-xl bg-[#00E5FF] text-slate-950 font-bold text-sm hover:bg-[#00b0ff] transition-all"
+                      className="px-6 py-2.5 rounded-xl bg-[#00E5FF] text-slate-950 font-bold text-sm hover:bg-[#00b0ff] transition-all w-full sm:w-auto"
                     >
                       Entendido
                     </button>
@@ -964,7 +964,7 @@ export default function App() {
             </div>
 
             {/* Dashboard Navigation Tabs */}
-            <div className="flex border-b border-white/5 mb-8">
+            <div className="flex border-b border-white/5 mb-8 overflow-x-auto scrollbar-none whitespace-nowrap">
               {[
                 { id: 'alertas', label: 'Alertas Vecinales', count: stats.activeAlerts },
                 { id: 'usuarios', label: 'Vecinos Registrados' },
@@ -974,7 +974,7 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => setDashboardTab(tab.id)}
-                  className={`px-6 py-4 font-semibold text-sm transition-all border-b-2 -mb-[2px] ${dashboardTab === tab.id ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-gray-400 hover:text-white'}`}
+                  className={`px-6 py-4 font-semibold text-sm transition-all border-b-2 -mb-[2px] inline-block whitespace-nowrap ${dashboardTab === tab.id ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-gray-400 hover:text-white'}`}
                 >
                   {tab.label}
                   {tab.count !== undefined && tab.count > 0 && (
