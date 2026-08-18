@@ -19,7 +19,9 @@ import {
   Activity,
   CheckCircle,
   Bell,
-  RefreshCw
+  RefreshCw,
+  Menu,
+  X
 } from 'lucide-react';
 
 export default function App() {
@@ -58,6 +60,7 @@ export default function App() {
   const [loginAttempts, setLoginAttempts] = useState(0);
   const [lockUntil, setLockUntil] = useState(null);
   const [requestTimestamps, setRequestTimestamps] = useState([]); // for rate limiting / flood protection
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Check auth status
   useEffect(() => {
@@ -406,13 +409,13 @@ export default function App() {
       <div className="absolute bottom-10 left-1/3 w-[450px] h-[450px] bg-red-500/5 rounded-full blur-[130px] pointer-events-none -z-10"></div>
 
       {/* Navigation Header */}
-      <header className="px-4 md:px-8 py-4">
+      <header className="px-4 md:px-8 py-4 relative z-50">
         <nav className="max-w-7xl mx-auto glassmorphism rounded-2xl px-6 py-4 flex items-center justify-between">
-          <a href="#" onClick={() => setCurrentPage('home')} className="flex items-center">
+          <a href="#" onClick={() => { setCurrentPage('home'); setMobileMenuOpen(false); }} className="flex items-center">
             <img src="images/image.png" alt="Eje Urbano Logo" className="h-10 w-auto object-contain rounded-xl" />
           </a>
 
-          {/* Links for visitors */}
+          {/* Links for desktop visitors */}
           {currentPage !== 'dashboard' && (
             <div className="hidden md:flex items-center gap-8 text-sm font-medium text-gray-300">
               <button onClick={() => setCurrentPage('features')} className={`hover:text-[#00E5FF] transition-colors ${currentPage === 'features' ? 'text-[#00E5FF]' : ''}`}>Funcionalidades</button>
@@ -422,25 +425,68 @@ export default function App() {
             </div>
           )}
 
-          {/* Auth controls */}
+          {/* Auth controls and Mobile Menu Trigger */}
           <div className="flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-4">
-                <button onClick={() => setCurrentPage('dashboard')} className="px-4 py-2 rounded-xl bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-xs font-semibold flex items-center gap-1.5">
-                  <LayoutDashboard className="w-3.5 h-3.5" />
-                  Panel Activo
+            <div className="hidden md:flex items-center gap-4">
+              {user ? (
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setCurrentPage('dashboard')} className="px-4 py-2 rounded-xl bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-xs font-semibold flex items-center gap-1.5">
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    Panel Activo
+                  </button>
+                  <button onClick={handleLogout} className="text-gray-400 hover:text-red-400 transition-colors" title="Cerrar Sesión">
+                    <LogOut className="w-5 h-5" />
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setCurrentPage('login')} className="px-5 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-semibold text-sm transition-all duration-300 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 hover:-translate-y-0.5">
+                  Acceder al Panel
                 </button>
-                <button onClick={handleLogout} className="text-gray-400 hover:text-red-400 transition-colors" title="Cerrar Sesión">
-                  <LogOut className="w-5 h-5" />
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => setCurrentPage('login')} className="px-5 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-semibold text-sm transition-all duration-300 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 hover:-translate-y-0.5">
-                Acceder al Panel
-              </button>
-            )}
+              )}
+            </div>
+
+            {/* Mobile Hamburger Button */}
+            <button 
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)} 
+              className="md:hidden p-2 text-gray-400 hover:text-white transition-colors"
+              aria-label="Toggle Menu"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
           </div>
         </nav>
+
+        {/* Mobile Dropdown Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden absolute top-full left-4 right-4 mt-2 glassmorphism rounded-2xl p-6 border border-white/5 flex flex-col gap-4 shadow-2xl animate-fade-in z-[1000]">
+            {currentPage !== 'dashboard' && (
+              <div className="flex flex-col gap-3">
+                <button onClick={() => { setCurrentPage('features'); setMobileMenuOpen(false); }} className={`text-left py-2 px-4 rounded-xl hover:bg-white/5 text-sm font-medium ${currentPage === 'features' ? 'text-[#00E5FF] bg-white/5' : 'text-gray-300'}`}>Funcionalidades</button>
+                <button onClick={() => { setCurrentPage('manual'); setMobileMenuOpen(false); }} className={`text-left py-2 px-4 rounded-xl hover:bg-white/5 text-sm font-medium ${currentPage === 'manual' ? 'text-[#00E5FF] bg-white/5' : 'text-gray-300'}`}>Manual de Usuario</button>
+                <button onClick={() => { setCurrentPage('iot'); setMobileMenuOpen(false); }} className={`text-left py-2 px-4 rounded-xl hover:bg-white/5 text-sm font-medium ${currentPage === 'iot' ? 'text-[#00E5FF] bg-white/5' : 'text-gray-300'}`}>Hardware IoT</button>
+                <button onClick={() => { setCurrentPage('download'); setMobileMenuOpen(false); }} className={`text-left py-2 px-4 rounded-xl hover:bg-white/5 text-sm font-medium ${currentPage === 'download' ? 'text-[#00E5FF] bg-white/5' : 'text-gray-300'}`}>Descargas</button>
+              </div>
+            )}
+            <div className="border-t border-white/5 pt-3 flex flex-col gap-3">
+              {user ? (
+                <>
+                  <button onClick={() => { setCurrentPage('dashboard'); setMobileMenuOpen(false); }} className="w-full py-3 rounded-xl bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-sm font-semibold flex items-center justify-center gap-1.5">
+                    <LayoutDashboard className="w-4 h-4" />
+                    Panel Activo
+                  </button>
+                  <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="w-full py-3 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 text-sm font-semibold flex items-center justify-center gap-1.5">
+                    <LogOut className="w-4 h-4" />
+                    Cerrar Sesión
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => { setCurrentPage('login'); setMobileMenuOpen(false); }} className="w-full py-3 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] text-white font-bold text-sm text-center">
+                  Acceder al Panel
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Main Content Area */}
