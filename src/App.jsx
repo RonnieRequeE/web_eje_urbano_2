@@ -54,6 +54,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState(null); // { rol, id_comunidad, nombre }
   const [mapTheme, setMapTheme] = useState('dark'); // 'dark' or 'light'
   const [selectedAlerta, setSelectedAlerta] = useState(null); // focused alert coordinates {lat, lng, id}
+  const [activeFeatureModal, setActiveFeatureModal] = useState(null); // 'sos' or 'map' or null
 
   // Check auth status
   useEffect(() => {
@@ -507,17 +508,25 @@ export default function App() {
                 Protección comunitaria en cada segundo
               </p>
               <p className="text-gray-400 mt-4 leading-relaxed">
-                Eje Urbano combina geolocalización, hardware IoT y comunicación directa para ofrecer respuesta inmediata ante cualquier peligro.
+                Eje Urbano combina geolocalización, hardware IoT y comunicación directa para ofrecer respuesta inmediata ante cualquier peligro. Haz clic en las tarjetas para conocer más detalles.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-16">
-              <div className="rounded-3xl p-8 glass-card flex flex-col justify-between">
+              
+              {/* SOS Card */}
+              <div 
+                onClick={() => setActiveFeatureModal('sos')}
+                className="rounded-3xl p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-red-500/40 hover:shadow-red-500/5 group"
+              >
                 <div>
-                  <span className="w-14 h-14 rounded-2xl bg-red-950/60 text-red-400 border border-red-500/20 flex items-center justify-center mb-6">
+                  <span className="w-14 h-14 rounded-2xl bg-red-950/60 text-red-400 border border-red-500/20 flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                     <AlertTriangle className="w-7 h-7" />
                   </span>
-                  <h3 className="text-2xl font-bold text-white mb-4">Alertas SOS Comunitarias</h3>
+                  <h3 className="text-2xl font-bold text-white mb-4 flex items-center justify-between">
+                    Alertas SOS Comunitarias
+                    <span className="text-xs text-red-400 font-semibold px-2.5 py-0.5 rounded-full bg-red-950/50 border border-red-500/20">Ver Detalle</span>
+                  </h3>
                   <p className="text-gray-400 leading-relaxed">
                     Envía notificaciones de emergencia con un solo toque. Captura tus coordenadas GPS reales y activa al instante las alertas sonoras y visuales en los celulares de todos los vecinos y administradores dentro de tu comunidad.
                   </p>
@@ -528,14 +537,21 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="rounded-3xl p-8 glass-card flex flex-col justify-between">
+              {/* Map Card */}
+              <div 
+                onClick={() => setActiveFeatureModal('map')}
+                className="rounded-3xl p-8 glass-card flex flex-col justify-between cursor-pointer hover:border-sky-500/40 hover:shadow-sky-500/5 group"
+              >
                 <div>
-                  <span className="w-14 h-14 rounded-2xl bg-sky-950/60 text-sky-400 border border-sky-500/20 flex items-center justify-center mb-6">
+                  <span className="w-14 h-14 rounded-2xl bg-sky-950/60 text-sky-400 border border-sky-500/20 flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                     <MapPin className="w-7 h-7" />
                   </span>
-                  <h3 className="text-2xl font-bold text-white mb-4">Mapas en Tiempo Real</h3>
+                  <h3 className="text-2xl font-bold text-white mb-4 flex items-center justify-between">
+                    Mapas en Tiempo Real
+                    <span className="text-xs text-[#00E5FF] font-semibold px-2.5 py-0.5 rounded-full bg-sky-950/50 border border-sky-500/20">Ver Detalle</span>
+                  </h3>
                   <p className="text-gray-400 leading-relaxed">
-                    Visualización dinámica de la ubicación de los incidentes en Google Maps. Ubica exactamente de dónde proviene la señal de auxilio y traza la ruta más rápida para acudir a prestar asistencia.
+                    Visualización dinámica de la ubicación de los incidentes en Google Maps. Ubica exactamente de dónde proviene la señal de auxilio para acudir a prestar asistencia de inmediato.
                   </p>
                 </div>
                 <div className="mt-8 pt-6 border-t border-white/5 flex items-center gap-3">
@@ -543,7 +559,93 @@ export default function App() {
                   <span className="text-xs text-gray-400">Integración con Google Maps API</span>
                 </div>
               </div>
+
             </div>
+
+            {/* MODAL: SOS DETAILS */}
+            {activeFeatureModal === 'sos' && (
+              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
+                <div className="glassmorphism border border-red-500/20 max-w-2xl w-full rounded-3xl p-8 shadow-2xl relative">
+                  <button 
+                    onClick={() => setActiveFeatureModal(null)}
+                    className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-2"
+                  >
+                    &times;
+                  </button>
+                  <div className="flex items-center gap-4 mb-6">
+                    <span className="w-12 h-12 rounded-xl bg-red-950/60 text-red-400 flex items-center justify-center">
+                      <AlertTriangle className="w-6 h-6" />
+                    </span>
+                    <div>
+                      <h3 className="text-2xl font-bold text-white">Detalle de Alertas SOS</h3>
+                      <p className="text-xs text-red-400 font-semibold uppercase tracking-wider">Ecosistema de Respuesta Rápida</p>
+                    </div>
+                  </div>
+                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[400px] overflow-y-auto pr-2">
+                    <p>
+                      El sistema de <strong>Alertas SOS de Eje Urbano</strong> te permite notificar situaciones críticas a tu comunidad y contactos de confianza al instante:
+                    </p>
+                    <ul className="list-disc pl-5 space-y-2 text-gray-400">
+                      <li><strong className="text-white">Botón Físico de Emergencia:</strong> Puedes activar una alerta SOS silenciosa de forma discreta manteniendo presionado el botón de **subir volumen** de tu teléfono por 5 segundos o más, sin necesidad de encender la pantalla.</li>
+                      <li><strong className="text-white">Tipos de Alerta Personalizados:</strong> Clasifica tu emergencia en 4 categorías: <em>Pánico (SOS), Robo, Asistencia Médica o Incendio</em>, para recibir la ayuda correspondiente de tus vecinos.</li>
+                      <li><strong className="text-white">Alarmas Audibles Instantáneas:</strong> Envía notificaciones de alta prioridad a tus contactos de confianza que sonarán inmediatamente en sus teléfonos, incluso si los tienen en modo silencioso.</li>
+                      <li><strong className="text-white">Activación de Sirenas Vecinales:</strong> Dispara de forma automática las sirenas físicas de alerta instaladas en las calles de tu barrio para disuadir cualquier amenaza o delincuente en la zona.</li>
+                    </ul>
+                  </div>
+                  <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
+                    <button 
+                      onClick={() => setActiveFeatureModal(null)}
+                      className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold text-sm transition-all"
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL: MAP DETAILS */}
+            {activeFeatureModal === 'map' && (
+              <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
+                <div className="glassmorphism border border-sky-500/20 max-w-2xl w-full rounded-3xl p-8 shadow-2xl relative">
+                  <button 
+                    onClick={() => setActiveFeatureModal(null)}
+                    className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl font-bold p-2"
+                  >
+                    &times;
+                  </button>
+                  <div className="flex items-center gap-4 mb-6">
+                    <span className="w-12 h-12 rounded-xl bg-sky-950/60 text-[#00E5FF] flex items-center justify-center">
+                      <MapPin className="w-6 h-6" />
+                    </span>
+                    <div>
+                      <h3 className="text-2xl font-bold text-white">Detalle de Mapas y Geolocalización</h3>
+                      <p className="text-xs text-[#00E5FF] font-semibold uppercase tracking-wider">Monitoreo y Trayecto Seguro</p>
+                    </div>
+                  </div>
+                  <div className="space-y-4 text-sm text-gray-300 leading-relaxed max-h-[400px] overflow-y-auto pr-2">
+                    <p>
+                      El sistema de geolocalización y mapas dinámicos está diseñado para cuidarte a ti y a tu familia en sus traslados diarios:
+                    </p>
+                    <ul className="list-disc pl-5 space-y-2 text-gray-400">
+                      <li><strong className="text-white">Trayecto Seguro ("Acompáñame a casa"):</strong> Te permite definir un tiempo estimado para tu recorrido. Si no marcas que has llegado a salvo y el temporizador expira, tus contactos de confianza recibirán automáticamente una alerta de SOS con tu última ubicación.</li>
+                      <li><strong className="text-white">Privacidad Respetada:</strong> La ubicación de tus trayectos normales es confidencial y solo la pueden ver los contactos de confianza que tú elijas. Nadie más, ni los administradores del barrio, pueden ver tus rutas rutinarias.</li>
+                      <li><strong className="text-white">Monitoreo Activo de Emergencias:</strong> Cuando activas una alerta de SOS, tu ubicación en el mapa se actualiza continuamente para que tus vecinos puedan ubicarte y acudir a ayudarte rápidamente.</li>
+                      <li><strong className="text-white">Llamadas de Auxilio Rápido:</strong> El mapa incluye accesos directos para llamar al instante a los números de emergencia oficiales de Bolivia, como la Policía (110), Ambulancias (118), Bomberos (119) y SAR (123).</li>
+                    </ul>
+                  </div>
+                  <div className="mt-8 pt-6 border-t border-white/5 flex justify-end">
+                    <button 
+                      onClick={() => setActiveFeatureModal(null)}
+                      className="px-6 py-2.5 rounded-xl bg-[#00E5FF] text-slate-950 font-bold text-sm hover:bg-[#00b0ff] transition-all"
+                    >
+                      Entendido
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </section>
         )}
 
