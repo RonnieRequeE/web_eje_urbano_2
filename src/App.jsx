@@ -762,7 +762,11 @@ export default function App() {
                 <p className="text-gray-400 leading-relaxed mb-8">
                   Conoce detalladamente las características operativas y flujos del ecosistema móvil y de administración para proteger a tu comunidad.
                 </p>
-                <a href="#" className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-sky-950/60 border border-[#00E5FF]/20 text-[#00E5FF] hover:bg-sky-900/40 text-sm font-semibold transition-all">
+                <a 
+                  href="Manual_de_Usuario_Eje_Urbano.pdf" 
+                  download="Manual_de_Usuario_Eje_Urbano.pdf"
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-sky-950/60 border border-[#00E5FF]/20 text-[#00E5FF] hover:bg-sky-900/40 text-sm font-semibold transition-all"
+                >
                   <BookOpen className="w-5 h-5" />
                   Descargar Manual Completo (PDF)
                 </a>
