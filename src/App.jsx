@@ -401,12 +401,13 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-[#F8FAFC] flex flex-col font-sans relative">
+    <div className="min-h-screen bg-[#0F172A] text-[#F8FAFC] flex flex-col font-sans relative overflow-x-hidden w-full">
       
       {/* Background decoration */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-sky-500/10 rounded-full blur-[120px] pointer-events-none -z-10"></div>
-      <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-[#1E88E5]/5 rounded-full blur-[150px] pointer-events-none -z-10"></div>
-      <div className="absolute bottom-10 left-1/3 w-[450px] h-[450px] bg-red-500/5 rounded-full blur-[130px] pointer-events-none -z-10"></div>
+      <div className="absolute top-0 left-1/4 w-[280px] sm:w-[500px] h-[280px] sm:h-[500px] bg-sky-500/10 rounded-full blur-[80px] sm:blur-[120px] pointer-events-none -z-10"></div>
+      <div className="absolute top-1/3 right-1/4 w-[300px] sm:w-[600px] h-[300px] sm:h-[600px] bg-[#1E88E5]/5 rounded-full blur-[100px] sm:blur-[150px] pointer-events-none -z-10"></div>
+      <div className="absolute bottom-10 left-1/3 w-[250px] sm:w-[450px] h-[250px] sm:h-[450px] bg-red-500/5 rounded-full blur-[90px] sm:blur-[130px] pointer-events-none -z-10"></div>
+
 
       {/* Navigation Header */}
       <header className="px-4 md:px-8 py-4 relative z-50">
