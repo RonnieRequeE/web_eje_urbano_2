@@ -21,7 +21,9 @@ import {
   Bell,
   RefreshCw,
   Menu,
-  X
+  X,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 export default function App() {
@@ -61,6 +63,7 @@ export default function App() {
   const [lockUntil, setLockUntil] = useState(null);
   const [requestTimestamps, setRequestTimestamps] = useState([]); // for rate limiting / flood protection
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Check auth status
   useEffect(() => {
@@ -325,6 +328,8 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setEmail('');
+    setPassword('');
     setCurrentPage('home');
   };
 
@@ -876,14 +881,23 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
-                  <input 
-                    type="password" 
-                    required 
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm" 
-                    placeholder="••••••••"
-                  />
+                  <div className="relative">
+                    <input 
+                      type={showPassword ? "text" : "password"} 
+                      required 
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full pl-4 pr-11 py-3 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm" 
+                      placeholder="••••••••"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
                 </div>
                 <button 
                   type="submit" 
@@ -925,18 +939,31 @@ export default function App() {
               </div>
             </div>
 
-            {/* Stats Overview */}
+            {/* Stats Overview (Funciona ahora como el selector de pestañas) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-              <div className={`p-6 rounded-2xl glass-card border transition-all ${stats.activeAlerts > 0 ? 'bg-red-500/10 border-red-500/30 animate-pulse' : 'border-white/5'}`}>
+              <div 
+                onClick={() => setDashboardTab('alertas')}
+                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'alertas' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'} ${stats.activeAlerts > 0 ? 'bg-red-500/10 border-red-500/30' : ''}`}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-sm font-semibold text-gray-400">Alertas Activas</span>
-                  <AlertTriangle className={`w-5 h-5 ${stats.activeAlerts > 0 ? 'text-red-500' : 'text-gray-400'}`} />
+                  <AlertTriangle className={`w-5 h-5 ${stats.activeAlerts > 0 ? 'text-red-500 animate-pulse' : 'text-gray-400'}`} />
                 </div>
-                <h3 className="text-4xl font-extrabold text-white">{stats.activeAlerts}</h3>
+                <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
+                  {stats.activeAlerts}
+                  {stats.activeAlerts > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-red-500 text-white text-xs font-extrabold animate-pulse">
+                      {stats.activeAlerts}
+                    </span>
+                  )}
+                </h3>
                 <p className="text-xs text-gray-400 mt-2">Emergencias que requieren atención</p>
               </div>
 
-              <div className="p-6 rounded-2xl glass-card border border-white/5">
+              <div 
+                onClick={() => setDashboardTab('usuarios')}
+                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'usuarios' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-sm font-semibold text-gray-400">Vecinos</span>
                   <Users className="w-5 h-5 text-emerald-400" />
@@ -945,7 +972,10 @@ export default function App() {
                 <p className="text-xs text-gray-400 mt-2">Usuarios registrados en el sistema</p>
               </div>
 
-              <div className="p-6 rounded-2xl glass-card border border-white/5">
+              <div 
+                onClick={() => setDashboardTab('dispositivos')}
+                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'dispositivos' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-sm font-semibold text-gray-400">Dispositivos IoT</span>
                   <Cpu className="w-5 h-5 text-amber-400" />
@@ -954,7 +984,10 @@ export default function App() {
                 <p className="text-xs text-gray-400 mt-2">Sirenas y Botones físicos activos</p>
               </div>
 
-              <div className="p-6 rounded-2xl glass-card border border-white/5">
+              <div 
+                onClick={() => setDashboardTab('comunidades')}
+                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'comunidades' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <span className="text-sm font-semibold text-gray-400">Comunidades</span>
                   <Home className="w-5 h-5 text-sky-400" />
@@ -962,29 +995,6 @@ export default function App() {
                 <h3 className="text-4xl font-extrabold text-white">{stats.totalCommunities}</h3>
                 <p className="text-xs text-gray-400 mt-2">Barrios organizados activos</p>
               </div>
-            </div>
-
-            {/* Dashboard Navigation Tabs */}
-            <div className="flex border-b border-white/5 mb-8 overflow-x-auto scrollbar-none whitespace-nowrap">
-              {[
-                { id: 'alertas', label: 'Alertas Vecinales', count: stats.activeAlerts },
-                { id: 'usuarios', label: 'Vecinos Registrados' },
-                { id: 'comunidades', label: 'Comunidades' },
-                { id: 'dispositivos', label: 'Dispositivos IoT' }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setDashboardTab(tab.id)}
-                  className={`px-6 py-4 font-semibold text-sm transition-all border-b-2 -mb-[2px] inline-block whitespace-nowrap ${dashboardTab === tab.id ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-gray-400 hover:text-white'}`}
-                >
-                  {tab.label}
-                  {tab.count !== undefined && tab.count > 0 && (
-                    <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500 text-white text-xs font-extrabold animate-pulse">
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              ))}
             </div>
 
             {/* Tab content 1: Alertas */}
