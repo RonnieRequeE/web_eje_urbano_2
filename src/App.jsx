@@ -518,7 +518,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="lg:col-span-5 flex justify-center items-center">
+              <div className="lg:col-span-5 hidden lg:flex justify-center items-center">
                 <div className="relative w-[280px] sm:w-[286px] h-[580px] sm:h-[620px] rounded-[34px] p-[5px] bg-gradient-to-b from-slate-700 via-slate-800 to-slate-950 glow-cyan shadow-2xl overflow-hidden">
                   <div className="w-full h-full rounded-[30px] bg-black relative overflow-hidden flex flex-col">
                     <div className="absolute top-2.5 left-1/2 transform -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-black border border-slate-900 z-30 flex items-center justify-center">
