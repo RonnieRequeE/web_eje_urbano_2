@@ -64,6 +64,7 @@ export default function App() {
   const [requestTimestamps, setRequestTimestamps] = useState([]); // for rate limiting / flood protection
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [manageAlerta, setManageAlerta] = useState(null); // Alerta seleccionada para gestionar su estado
 
   // Check auth status
   useEffect(() => {
@@ -130,13 +131,15 @@ export default function App() {
     // Subscribe to new Alerts in Realtime!
     const alertsSubscription = supabase
       .channel('realtime_alerts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, (payload) => {
-        fetchAlertas();
-        fetchStats();
-        // Play warning beep if a new active alert arrives
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, async (payload) => {
+        // Ejecutar primero la lógica instantánea de la alerta entrante
         if (payload.new && payload.new.estado === 'activa') {
+          // 1. Sonar pitido de forma inmediata
           try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') {
+              await audioCtx.resume();
+            }
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
             oscillator.type = 'sine';
@@ -149,7 +152,20 @@ export default function App() {
           } catch (e) {
             console.log("Audio feedback error: ", e);
           }
+
+          // 2. Enfocar el mapa y abrir popup de forma inmediata
+          if (payload.new.latitud && payload.new.longitud) {
+            setSelectedAlerta({
+              latitud: payload.new.latitud,
+              longitud: payload.new.longitud,
+              id: payload.new.id
+            });
+          }
         }
+        
+        // 3. Descargar la nueva lista en segundo plano para actualizar la tabla
+        await fetchAlertas();
+        fetchStats();
       })
       .subscribe();
 
@@ -162,11 +178,49 @@ export default function App() {
       })
       .subscribe();
 
+    // Escuchar clicks de alertas dentro del iframe del mapa
+    const handleMapMessage = (event) => {
+      if (event.data && event.data.type === 'SELECT_ALERTA') {
+        const alertaId = event.data.id;
+        const alertaEncontrada = alertas.find(a => a.id === alertaId);
+        if (alertaEncontrada) {
+          setSelectedAlerta({
+            latitud: alertaEncontrada.latitud,
+            longitud: alertaEncontrada.longitud,
+            id: alertaEncontrada.id
+          });
+          
+          // Desplazar únicamente el contenedor scrollable de la tabla
+          setTimeout(() => {
+            const element = document.getElementById(`alerta-row-${alertaId}`);
+            if (element) {
+              // Buscar el contenedor scrollable de la tabla (el div que tiene max-h-[450px])
+              const scrollContainer = element.closest('.overflow-y-auto');
+              if (scrollContainer) {
+                // Calcular la posición relativa del elemento dentro del contenedor
+                const elementTop = element.offsetTop;
+                const containerHeight = scrollContainer.clientHeight;
+                const elementHeight = element.clientHeight;
+                
+                // Centrar la fila de la alerta en el medio del contenedor scrollable de la tabla
+                scrollContainer.scrollTo({
+                  top: elementTop - (containerHeight / 2) + (elementHeight / 2),
+                  behavior: 'smooth'
+                });
+              }
+            }
+          }, 100);
+        }
+      }
+    };
+    window.addEventListener('message', handleMapMessage);
+
     return () => {
       supabase.removeChannel(alertsSubscription);
       supabase.removeChannel(usersSubscription);
+      window.removeEventListener('message', handleMapMessage);
     };
-  }, [user, currentPage]);
+  }, [user, currentPage, alertas]);
 
   const fetchStats = async () => {
     try {
@@ -333,15 +387,21 @@ export default function App() {
     setCurrentPage('home');
   };
 
-  // Toggle Alert status (Deactivate Emergency)
-  const handleToggleAlerta = async (id, currentStatus) => {
-    const nextStatus = currentStatus === 'activa' ? 'finalizada' : 'activa';
-    await supabase
+  // Actualizar estado específico de la alerta
+  const handleUpdateAlertStatus = async (id, nuevoEstado) => {
+    setFormLoading(true);
+    const { error } = await supabase
       .from('alertas')
-      .update({ estado: nextStatus })
+      .update({ estado: nuevoEstado })
       .eq('id', id);
-    fetchAlertas();
-    fetchStats();
+    if (!error) {
+      fetchAlertas();
+      fetchStats();
+      setManageAlerta(null);
+    } else {
+      alert("Error al actualizar el estado de la alerta: " + error.message);
+    }
+    setFormLoading(false);
   };
 
   // Create Comunidad
@@ -416,7 +476,7 @@ export default function App() {
 
       {/* Navigation Header */}
       <header className="px-4 md:px-8 py-4 relative z-50">
-        <nav className="max-w-7xl mx-auto glassmorphism rounded-2xl px-6 py-4 flex items-center justify-between">
+        <nav className="max-w-[95%] mx-auto glassmorphism rounded-2xl px-6 py-4 flex items-center justify-between">
           <a href="#" onClick={() => { setCurrentPage('home'); setMobileMenuOpen(false); }} className="flex items-center">
             <img src="images/image.png" alt="Eje Urbano Logo" className="h-10 w-auto object-contain rounded-xl" />
           </a>
@@ -917,7 +977,7 @@ export default function App() {
 
         {/* PAGE: DASHBOARD */}
         {currentPage === 'dashboard' && user && (
-          <section className="max-w-7xl mx-auto px-4 md:px-8 py-8 animate-fade-in">
+          <section className="max-w-[95%] mx-auto px-4 md:px-8 py-8 animate-fade-in">
             
             {/* Header section with realtime status */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -1006,7 +1066,7 @@ export default function App() {
               <div className="space-y-6">
                 
                 {/* Active Alerts Live Map */}
-                <div className="rounded-2xl border border-white/5 overflow-hidden h-[400px] relative glow-cyan flex flex-col">
+                <div className="rounded-2xl border border-white/5 overflow-hidden h-[550px] relative glow-cyan flex flex-col">
                   {/* Theme Selector Overlay */}
                   <div className="absolute top-3 right-3 z-[1010] bg-slate-900/90 border border-white/10 rounded-xl p-1 flex gap-1 shadow-lg backdrop-blur-md">
                     <button 
@@ -1024,7 +1084,7 @@ export default function App() {
                   </div>
 
                   <iframe
-                    key={`${alertas.filter(a => a.estado === 'activa').length}-${mapTheme}-${alertas.map(a => a.id + a.estado).join('')}-${selectedAlerta ? selectedAlerta.id : 'none'}`}
+                    key={`map-${mapTheme}-${alertas.length}-${selectedAlerta ? selectedAlerta.id : 'none'}`}
                     className="w-full h-full border-0 flex-grow"
                     title="Active Alerts Map"
                     srcDoc={`
@@ -1097,16 +1157,29 @@ export default function App() {
                               iconAnchor: [12, 12]
                             });
 
+                            var fecha = new Date(alerta.created_at);
+                            var horaFormateada = fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                            var fechaFormateada = fecha.toLocaleDateString('es-ES');
+
                             var popupContent = '<div class="popup-box">' +
                               '<h3>🚨 ' + alerta.tipo + '</h3>' +
                               '<p><strong>Vecino:</strong> ' + (alerta.emisor?.nombre || 'Botón Físico / Anónimo') + '</p>' +
                               '<p><strong>Origen:</strong> ' + alerta.origen + '</p>' +
                               '<p><strong>Comunidad:</strong> ' + (alerta.comunidad?.nombre || 'General') + '</p>' +
+                              '<p><strong>Hora:</strong> ' + fechaFormateada + ' ' + horaFormateada + '</p>' +
                               '</div>';
 
                             var marker = L.marker([alerta.latitud, alerta.longitud], { icon: icon })
                               .bindPopup(popupContent)
                               .addTo(map);
+
+                            // Notificar a la web padre cuando el usuario hace clic en el marcador
+                            marker.on('click', function() {
+                              window.parent.postMessage({
+                                type: 'SELECT_ALERTA',
+                                id: alerta.id
+                              }, '*');
+                            });
 
                             if (focusAlerta && focusAlerta.id === alerta.id) {
                               marker.openPopup();
@@ -1161,12 +1234,13 @@ export default function App() {
                           alertas.map((alerta) => (
                             <tr 
                               key={alerta.id} 
+                              id={`alerta-row-${alerta.id}`}
                               onClick={() => {
                                 if (alerta.estado === 'activa' && alerta.latitud && alerta.longitud) {
                                   setSelectedAlerta({ latitud: alerta.latitud, longitud: alerta.longitud, id: alerta.id });
                                 }
                               }}
-                              className={`transition-colors cursor-pointer ${alerta.estado === 'activa' ? 'hover:bg-red-500/5 bg-red-500/2' : 'hover:bg-slate-900/40'}`}
+                              className={`transition-colors cursor-pointer ${selectedAlerta && selectedAlerta.id === alerta.id ? 'bg-sky-500/10 border-l-4 border-l-[#00E5FF] hover:bg-sky-500/20' : alerta.estado === 'activa' ? 'hover:bg-red-500/5 bg-red-500/2' : 'hover:bg-slate-900/40'}`}
                             >
                               <td className="px-6 py-4 font-mono text-xs text-gray-400">{alerta.id}</td>
                               <td className="px-6 py-4 font-semibold">{alerta.emisor?.nombre || 'Botón Físico / Anónimo'}</td>
@@ -1188,16 +1262,56 @@ export default function App() {
                               </td>
                               <td className="px-6 py-4 text-gray-300">{alerta.comunidad?.nombre || 'General'}</td>
                               <td className="px-6 py-4 text-gray-400 text-xs">{new Date(alerta.created_at).toLocaleString()}</td>
-                              <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                              <td className="px-6 py-4 text-right relative" onClick={(e) => e.stopPropagation()}>
                                 {alerta.estado === 'activa' ? (
-                                  <button 
-                                    onClick={() => handleToggleAlerta(alerta.id, alerta.estado)}
-                                    className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-500/20"
-                                  >
-                                    Desactivar Emergencia
-                                  </button>
+                                  <div className="relative inline-block text-left">
+                                    <button 
+                                      onClick={() => setManageAlerta(manageAlerta && manageAlerta.id === alerta.id ? null : alerta)}
+                                      className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-500/20"
+                                    >
+                                      Atender Emergencia
+                                    </button>
+
+                                    {/* MENU FLOTANTE CONTEXTUAL (Sólo ocupa su propio tamaño) */}
+                                    {manageAlerta && manageAlerta.id === alerta.id && (
+                                      <div className="origin-top-right absolute right-0 mt-2 w-64 rounded-2xl shadow-2xl bg-[#1e293b] border border-white/10 p-4 z-[2000] animate-fade-in text-left">
+                                        <div className="mb-3 border-b border-white/5 pb-2">
+                                          <p className="text-[10px] text-gray-400 uppercase font-semibold">Gestionar Alerta</p>
+                                          <p className="text-xs text-white truncate">Emisor: {alerta.emisor?.nombre || 'Botón Físico'}</p>
+                                        </div>
+                                        <div className="space-y-2">
+                                          <button 
+                                            onClick={() => handleUpdateAlertStatus(alerta.id, 'activa')}
+                                            className="w-full py-2 px-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs transition-all text-left flex items-center gap-1.5"
+                                          >
+                                            ⏳ PENDIENTE (ACTIVA)
+                                          </button>
+                                          <button 
+                                            onClick={() => handleUpdateAlertStatus(alerta.id, 'finalizada')}
+                                            className="w-full py-2 px-3 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-xs transition-all text-left flex items-center gap-1.5"
+                                          >
+                                            ✅ ATENDIDA (FINALIZADA)
+                                          </button>
+                                          <button 
+                                            onClick={() => handleUpdateAlertStatus(alerta.id, 'falsa_alarma')}
+                                            className="w-full py-2 px-3 rounded-xl bg-gray-600 hover:bg-gray-500 text-white font-bold text-xs transition-all text-left flex items-center gap-1.5"
+                                          >
+                                            ❌ FALSA ALARMA
+                                          </button>
+                                          <button 
+                                            onClick={() => setManageAlerta(null)}
+                                            className="w-full py-1.5 text-center text-gray-400 hover:text-white text-xs font-semibold uppercase tracking-wider mt-1"
+                                          >
+                                            CANCELAR
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
                                 ) : (
-                                  <span className="text-gray-500 text-xs">Resuelta</span>
+                                  <span className={`px-2 py-1 rounded text-xs font-bold ${alerta.estado === 'finalizada' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-500/10 text-gray-400'}`}>
+                                    {alerta.estado === 'finalizada' ? 'Resuelta' : 'Falsa Alarma'}
+                                  </span>
                                 )}
                               </td>
                             </tr>
@@ -1496,7 +1610,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-4 md:px-8 py-12 border-t border-white/5 text-center text-sm text-gray-500 w-full mt-auto">
+      <footer className="max-w-[95%] mx-auto px-4 md:px-8 py-12 border-t border-white/5 text-center text-sm text-gray-500 w-full mt-auto">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <button onClick={() => setCurrentPage('home')} className="flex items-center gap-2 font-bold text-white">
             <img src="images/image.png" alt="Logo" className="w-6 h-6 object-contain rounded-lg" />
