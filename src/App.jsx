@@ -36,7 +36,11 @@ import {
   Check,
   Mail,
   Phone,
-  Calendar
+  Calendar,
+  FileText,
+  BarChart3,
+  Clock,
+  Sparkles
 } from 'lucide-react';
 
 export default function App() {
@@ -1906,7 +1910,7 @@ export default function App() {
             </div>
 
             {/* Stats Overview (Funciona ahora como el selector de pestañas) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-5 mb-10">
               <div 
                 onClick={() => setDashboardTab('alertas')}
                 className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
@@ -1992,6 +1996,32 @@ export default function App() {
                 <h3 className="text-4xl font-extrabold text-white">{stats.totalCommunities}</h3>
                 <p className="text-xs text-gray-400 mt-2">Barrios organizados activos</p>
                 {dashboardTab === 'comunidades' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
+              </div>
+
+              <div 
+                onClick={() => setDashboardTab('reportes')}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'reportes' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : 'border border-white/5 opacity-80 hover:opacity-100'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`text-sm font-semibold ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Reportes</span>
+                  <BarChart3 className={`w-5 h-5 ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-purple-400'}`} />
+                </div>
+                <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
+                  <span>Métricas</span>
+                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30">
+                    Pronto
+                  </span>
+                </h3>
+                <p className="text-xs text-gray-400 mt-2">Exportación y auditoría vecinal</p>
+                {dashboardTab === 'reportes' && (
                   <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
                   </div>
@@ -2993,6 +3023,77 @@ export default function App() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab content 5: Reportes (En desarrollo) */}
+            {dashboardTab === 'reportes' && (
+              <div className="glassmorphism rounded-3xl p-8 md:p-14 border border-white/10 text-center relative overflow-hidden animate-fade-in shadow-2xl">
+                {/* Glow decorativo de fondo */}
+                <div className="absolute -top-24 -right-24 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-[#00E5FF]/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div className="relative z-10 max-w-2xl mx-auto">
+                  {/* Icono central con aura */}
+                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-purple-600/30 to-[#00E5FF]/30 border border-purple-500/40 flex items-center justify-center mx-auto mb-6 shadow-xl shadow-purple-500/20">
+                    <BarChart3 className="w-10 h-10 text-[#00E5FF]" />
+                  </div>
+
+                  {/* Badge de estado */}
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mb-5">
+                    <Clock className="w-3.5 h-3.5" />
+                    Módulo en Desarrollo
+                  </div>
+
+                  <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight mb-4">
+                    Centro de Reportes y Auditoría
+                  </h2>
+
+                  <p className="text-gray-400 text-sm md:text-base leading-relaxed mb-8">
+                    Esta sección se encuentra actualmente <strong className="text-white">en desarrollo</strong>. Muy pronto podrás generar y exportar informes ejecutivos, estadísticas históricas de emergencias y métricas de seguridad vecinal.
+                  </p>
+
+                  {/* Tarjetas de avance / próximas funciones */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left mb-8">
+                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
+                      <div className="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <h4 className="text-sm font-bold text-white mb-1">Reportes en PDF</h4>
+                      <p className="text-xs text-gray-400">Informes formales listos para asambleas vecinales.</p>
+                      <span className="inline-block mt-3 text-[10px] font-semibold text-purple-400/80 bg-purple-500/10 px-2 py-0.5 rounded-md">
+                        En construcción
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
+                      <div className="w-8 h-8 rounded-xl bg-sky-500/10 flex items-center justify-center text-[#00E5FF] mb-3">
+                        <BarChart3 className="w-4 h-4" />
+                      </div>
+                      <h4 className="text-sm font-bold text-white mb-1">Hojas de Cálculo</h4>
+                      <p className="text-xs text-gray-400">Exportación completa de datos en formato Excel y CSV.</p>
+                      <span className="inline-block mt-3 text-[10px] font-semibold text-[#00E5FF]/80 bg-[#00E5FF]/10 px-2 py-0.5 rounded-md">
+                        En construcción
+                      </span>
+                    </div>
+
+                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 mb-3">
+                        <Activity className="w-4 h-4" />
+                      </div>
+                      <h4 className="text-sm font-bold text-white mb-1">Tiempos de Respuesta</h4>
+                      <p className="text-xs text-gray-400">Métricas de velocidad y efectividad de atención.</p>
+                      <span className="inline-block mt-3 text-[10px] font-semibold text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                        En construcción
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/80 border border-white/10 text-gray-400 text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>Disponible próximamente en la plataforma Eje Urbano</span>
                   </div>
                 </div>
               </div>
