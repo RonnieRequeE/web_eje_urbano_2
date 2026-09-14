@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from './supabaseClient';
+import { createClient } from '@supabase/supabase-js';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { 
   Shield, 
   MapPin, 
@@ -23,7 +24,19 @@ import {
   Menu,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Edit,
+  Trash2,
+  Radio,
+  Ban,
+  User,
+  ShieldCheck,
+  ChevronDown,
+  Copy,
+  Check,
+  Mail,
+  Phone,
+  Calendar
 } from 'lucide-react';
 
 export default function App() {
@@ -49,13 +62,56 @@ export default function App() {
   const [dispositivos, setDispositivos] = useState([]);
   const [dashboardTab, setDashboardTab] = useState('alertas'); // 'alertas', 'usuarios', 'comunidades', 'dispositivos'
 
+  const countryCodes = [
+    { code: "+591", name: "Bolivia", flag: "🇧🇴" },
+    { code: "+54", name: "Argentina", flag: "🇦🇷" },
+    { code: "+55", name: "Brasil", flag: "🇧🇷" },
+    { code: "+56", name: "Chile", flag: "🇨🇱" },
+    { code: "+51", name: "Perú", flag: "🇵🇪" },
+    { code: "+57", name: "Colombia", flag: "🇨🇴" },
+    { code: "+58", name: "Venezuela", flag: "🇻🇪" },
+    { code: "+593", name: "Ecuador", flag: "🇪🇨" },
+    { code: "+595", name: "Paraguay", flag: "🇵🇾" },
+    { code: "+598", name: "Uruguay", flag: "🇺🇾" },
+    { code: "+52", name: "México", flag: "🇲🇽" },
+    { code: "+1", name: "Estados Unidos", flag: "🇺🇸" },
+    { code: "+34", name: "España", flag: "🇪🇸" }
+  ];
+
   // Form states for creating resources
   const [newComunidad, setNewComunidad] = useState({ nombre: '', descripcion: '' });
-  const [newUsuario, setNewUsuario] = useState({ id: '', nombre: '', rol: 'vecino', direccion: '', id_comunidad: '' });
-  const [newDispositivo, setNewDispositivo] = useState({ id_usuario: '', mac_address: '', tipo: 'sirena', id_comunidad: '' });
+  const [newUsuario, setNewUsuario] = useState({ 
+    nombre: '', 
+    email: '', 
+    password: '', 
+    direccion: '', 
+    rol: 'vecino', 
+    id_comunidad: '',
+    phoneNo: '',
+    countryCode: '+591'
+  });
+  const [showUserPassword, setShowUserPassword] = useState(false);
+  const [userFormMessage, setUserFormMessage] = useState({ type: '', text: '' });
+  const [newDispositivo, setNewDispositivo] = useState({ 
+    mac_address: '', 
+    tipo: 'sirena', 
+    zona: '', 
+    id_comunidad: '', 
+    id_usuario: '', 
+    latitud: '', 
+    longitud: '', 
+    estado: 'activo' 
+  });
+  const [deviceFormMessage, setDeviceFormMessage] = useState({ type: '', text: '' });
+  const [editingComunidad, setEditingComunidad] = useState(null); // { id, nombre, descripcion, estado }
+  const [editingUsuario, setEditingUsuario] = useState(null); // { id, nombre, direccion, rol, id_comunidad, phoneNo, countryCode, estado }
+  const [editingDispositivo, setEditingDispositivo] = useState(null); // { mac_address, tipo, zona, id_comunidad, id_usuario, latitud, longitud, estado }
+  const [comunidadFormMessage, setComunidadFormMessage] = useState({ type: '', text: '' });
   const [formLoading, setFormLoading] = useState(false);
 
-  const [userProfile, setUserProfile] = useState(null); // { rol, id_comunidad, nombre }
+  const [userProfile, setUserProfile] = useState(null); // { id, email, rol, id_comunidad, nombre, direccion, telefono, estado, created_at }
+  const [profileOpen, setProfileOpen] = useState(false);
+
   const [mapTheme, setMapTheme] = useState('dark'); // 'dark' or 'light'
   const [selectedAlerta, setSelectedAlerta] = useState(null); // focused alert coordinates {lat, lng, id}
   const [activeFeatureModal, setActiveFeatureModal] = useState(null); // 'sos' or 'map' or null
@@ -77,16 +133,21 @@ export default function App() {
       try {
         const { data: profile } = await supabase
           .from('usuarios')
-          .select('id, nombre, rol, id_comunidad, comunidad:comunidades(nombre)')
+          .select('id, nombre, rol, id_comunidad, direccion, telefono, estado, created_at, comunidad:comunidades(nombre)')
           .eq('id', sessionUser.id)
           .single();
         if (profile) {
           setUserProfile({
             id: profile.id,
+            email: sessionUser.email,
             nombre: profile.nombre,
             rol: profile.rol,
             id_comunidad: profile.id_comunidad,
-            nombre_comunidad: profile.comunidad?.nombre || ''
+            nombre_comunidad: profile.comunidad?.nombre || '',
+            direccion: profile.direccion || '',
+            telefono: profile.telefono || '',
+            estado: profile.estado || 'activo',
+            created_at: profile.created_at || ''
           });
         }
       } catch (err) {
@@ -453,60 +514,493 @@ export default function App() {
   // Create Comunidad
   const handleCreateComunidad = async (e) => {
     e.preventDefault();
+    setComunidadFormMessage({ type: '', text: '' });
     if (userProfile && userProfile.rol !== 'super_admin') {
-      alert("Solo el Super Administrador puede crear comunidades.");
+      setComunidadFormMessage({ type: 'error', text: "Solo el Super Administrador puede crear comunidades." });
+      return;
+    }
+    if (!newComunidad.nombre.trim()) {
+      setComunidadFormMessage({ type: 'error', text: "El nombre de la comunidad es obligatorio." });
       return;
     }
     setFormLoading(true);
     const { error } = await supabase
       .from('comunidades')
-      .insert([newComunidad]);
+      .insert([{
+        nombre: newComunidad.nombre.trim(),
+        descripcion: newComunidad.descripcion.trim() || null
+      }]);
     if (!error) {
       setNewComunidad({ nombre: '', descripcion: '' });
+      setComunidadFormMessage({ type: 'success', text: "Comunidad creada exitosamente." });
       fetchComunidades();
       fetchStats();
+    } else {
+      setComunidadFormMessage({ type: 'error', text: "Error al crear: " + error.message });
     }
     setFormLoading(false);
   };
 
-  // Create Usuario (Vecino)
-  const handleCreateUsuario = async (e) => {
+  // Edit Comunidad
+  const handleUpdateComunidad = async (e) => {
     e.preventDefault();
+    if (!editingComunidad) return;
+    setComunidadFormMessage({ type: '', text: '' });
     setFormLoading(true);
-    const payload = { ...newUsuario };
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      payload.id_comunidad = userProfile.id_comunidad;
+    let payload = {
+      nombre: editingComunidad.nombre.trim(),
+      descripcion: editingComunidad.descripcion ? editingComunidad.descripcion.trim() : null
+    };
+    if (editingComunidad.estado) {
+      payload.estado = editingComunidad.estado;
     }
     const { error } = await supabase
-      .from('usuarios')
-      .insert([payload]);
+      .from('comunidades')
+      .update(payload)
+      .eq('id', editingComunidad.id);
     if (!error) {
-      setNewUsuario({ id: '', nombre: '', rol: 'vecino', direccion: '', id_comunidad: '' });
+      setEditingComunidad(null);
+      setComunidadFormMessage({ type: 'success', text: "Comunidad actualizada correctamente." });
+      fetchComunidades();
+      fetchStats();
+    } else {
+      setComunidadFormMessage({ type: 'error', text: "Error al actualizar comunidad: " + error.message });
+    }
+    setFormLoading(false);
+  };
+
+  // Toggle Comunidad Estado (Borrado Lógico)
+  const handleToggleComunidadEstado = async (comunidadId, estadoActual, comunidadNombre) => {
+    const nuevoEstado = estadoActual === 'inactivo' ? 'activo' : 'inactivo';
+    const accion = nuevoEstado === 'inactivo' ? 'desactivar (borrado lógico)' : 'reactivar';
+    if (!window.confirm(`¿Estás seguro de que deseas ${accion} la comunidad "${comunidadNombre}"?`)) {
+      return;
+    }
+    setFormLoading(true);
+    setComunidadFormMessage({ type: '', text: '' });
+    const { error } = await supabase
+      .from('comunidades')
+      .update({ estado: nuevoEstado })
+      .eq('id', comunidadId);
+    if (!error) {
+      setComunidadFormMessage({ type: 'success', text: `Comunidad "${comunidadNombre}" ${nuevoEstado === 'inactivo' ? 'desactivada' : 'reactivada'} con éxito.` });
+      fetchComunidades();
+      fetchStats();
+    } else {
+      if (error.code === '42703' || error.message?.includes('estado')) {
+        setComunidadFormMessage({ 
+          type: 'error', 
+          text: 'Para usar borrado lógico en comunidades, ejecuta add_estado_comunidades.sql en el SQL Editor de Supabase.' 
+        });
+      } else {
+        setComunidadFormMessage({ type: 'error', text: "Error al cambiar estado de comunidad: " + error.message });
+      }
+    }
+    setFormLoading(false);
+  };
+
+  // Create Usuario (Vecino / Admin / Super Admin)
+  const handleCreateUsuario = async (e) => {
+    e.preventDefault();
+    setUserFormMessage({ type: '', text: '' });
+
+    const nombreTrim = newUsuario.nombre.trim();
+    const emailTrim = newUsuario.email.trim();
+    const passwordVal = newUsuario.password;
+    const direccionTrim = newUsuario.direccion.trim();
+    const phoneNoTrim = newUsuario.phoneNo.trim();
+
+    // 1. Validaciones idénticas a la App
+    const namePattern = /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$/;
+    if (!namePattern.test(nombreTrim)) {
+      setUserFormMessage({ type: 'error', text: 'El nombre solo debe contener letras y espacios' });
+      return;
+    }
+
+    const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailPattern.test(emailTrim)) {
+      setUserFormMessage({ type: 'error', text: 'Por favor, ingresa un correo electrónico válido' });
+      return;
+    }
+
+    if (passwordVal.length < 6 || !/[A-Z]/.test(passwordVal) || !/[0-9]/.test(passwordVal)) {
+      setUserFormMessage({ type: 'error', text: 'La contraseña debe tener al menos 6 caracteres, una letra mayúscula y un número' });
+      return;
+    }
+
+    const addressPattern = /^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s,.:\-#]+$/;
+    if (!addressPattern.test(direccionTrim)) {
+      setUserFormMessage({ type: 'error', text: 'La dirección contiene caracteres no válidos' });
+      return;
+    }
+
+    if (!/^\d{7,}$/.test(phoneNoTrim)) {
+      setUserFormMessage({ type: 'error', text: 'El número de celular debe ser solo dígitos (mínimo 7 números)' });
+      return;
+    }
+
+    // Determinar la comunidad asignada
+    let comunidadId = null;
+    if (userProfile && userProfile.rol === 'admin') {
+      comunidadId = userProfile.id_comunidad;
+    } else if (newUsuario.id_comunidad) {
+      comunidadId = Number(newUsuario.id_comunidad);
+    }
+
+    if (!comunidadId && newUsuario.rol !== 'super_admin') {
+      setUserFormMessage({ type: 'error', text: 'Debes seleccionar o pertenecer a una comunidad' });
+      return;
+    }
+
+    setFormLoading(true);
+    try {
+      // Cliente aislado sin almacenamiento de sesión para que el Admin/SuperAdmin no pierda su sesión web
+      const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
+
+      const telefonoCompleto = `${newUsuario.countryCode}${phoneNoTrim}`;
+
+      const { data, error } = await tempClient.auth.signUp({
+        email: emailTrim,
+        password: passwordVal,
+        options: {
+          data: {
+            nombre: nombreTrim,
+            direccion: direccionTrim,
+            rol: newUsuario.rol,
+            id_comunidad: comunidadId,
+            telefono: telefonoCompleto
+          }
+        }
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setUserFormMessage({ 
+        type: 'success', 
+        text: `¡Usuario ${nombreTrim} registrado con éxito!` 
+      });
+
+      // Limpiar campos del formulario
+      setNewUsuario({ 
+        nombre: '', 
+        email: '', 
+        password: '', 
+        direccion: '', 
+        rol: 'vecino', 
+        id_comunidad: '',
+        phoneNo: '',
+        countryCode: '+591'
+      });
+
+      // Refrescar lista de usuarios y estadísticas
+      fetchUsuarios();
+      fetchStats();
+    } catch (err) {
+      setUserFormMessage({ 
+        type: 'error', 
+        text: err.message || 'Error al registrar el usuario en Supabase' 
+      });
+    } finally {
+      setFormLoading(false);
+    }
+  };
+
+  // Abrir formulario de edición de Usuario
+  const openEditUsuario = (usu) => {
+    let code = '+591';
+    let phone = usu.telefono || '';
+    if (phone.startsWith('+')) {
+      const match = countryCodes.find(c => phone.startsWith(c.code));
+      if (match) {
+        code = match.code;
+        phone = phone.slice(match.code.length);
+      }
+    }
+    setEditingUsuario({
+      id: usu.id,
+      nombre: usu.nombre || '',
+      direccion: usu.direccion || '',
+      rol: usu.rol || 'vecino',
+      id_comunidad: usu.id_comunidad ? String(usu.id_comunidad) : '',
+      phoneNo: phone,
+      countryCode: code,
+      estado: usu.estado || 'activo'
+    });
+    setUserFormMessage({ type: '', text: '' });
+  };
+
+  // Update Usuario
+  const handleUpdateUsuario = async (e) => {
+    e.preventDefault();
+    if (!editingUsuario) return;
+    setUserFormMessage({ type: '', text: '' });
+
+    const nombreTrim = editingUsuario.nombre.trim();
+    const direccionTrim = editingUsuario.direccion.trim();
+    const phoneNoTrim = editingUsuario.phoneNo.trim();
+
+    const namePattern = /^[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\s]+$/;
+    if (!namePattern.test(nombreTrim)) {
+      setUserFormMessage({ type: 'error', text: 'El nombre solo debe contener letras y espacios' });
+      return;
+    }
+
+    const addressPattern = /^[a-zA-Z0-9áéíóúÁÉÍÓÚñÑüÜ\s,.:\-#]+$/;
+    if (!addressPattern.test(direccionTrim)) {
+      setUserFormMessage({ type: 'error', text: 'La dirección contiene caracteres no válidos' });
+      return;
+    }
+
+    if (phoneNoTrim && !/^\d{7,}$/.test(phoneNoTrim)) {
+      setUserFormMessage({ type: 'error', text: 'El número de celular debe ser solo dígitos (mínimo 7 números)' });
+      return;
+    }
+
+    let comId = null;
+    if (userProfile && userProfile.rol === 'admin') {
+      comId = userProfile.id_comunidad;
+    } else if (editingUsuario.id_comunidad) {
+      comId = Number(editingUsuario.id_comunidad);
+    }
+
+    if (!comId && editingUsuario.rol !== 'super_admin') {
+      setUserFormMessage({ type: 'error', text: 'Debes seleccionar o pertenecer a una comunidad' });
+      return;
+    }
+
+    setFormLoading(true);
+    const telefonoCompleto = phoneNoTrim ? `${editingUsuario.countryCode}${phoneNoTrim}` : null;
+    const { error } = await supabase
+      .from('usuarios')
+      .update({
+        nombre: nombreTrim,
+        direccion: direccionTrim,
+        rol: editingUsuario.rol,
+        id_comunidad: comId,
+        estado: editingUsuario.estado,
+        telefono: telefonoCompleto
+      })
+      .eq('id', editingUsuario.id);
+
+    if (!error) {
+      setEditingUsuario(null);
+      setUserFormMessage({ type: 'success', text: `Usuario "${nombreTrim}" actualizado correctamente.` });
       fetchUsuarios();
       fetchStats();
     } else {
-      alert("Error al crear usuario: " + error.message);
+      setUserFormMessage({ type: 'error', text: 'Error al actualizar usuario: ' + error.message });
     }
     setFormLoading(false);
   };
 
-  // Create Dispositivo
+  // Toggle Usuario Estado (Borrado Lógico)
+  const handleToggleUsuarioEstado = async (usuarioId, estadoActual, usuarioNombre) => {
+    const nuevoEstado = estadoActual === 'deshabilitado' ? 'activo' : 'deshabilitado';
+    const accion = nuevoEstado === 'deshabilitado' ? 'deshabilitar (borrado lógico)' : 'reactivar';
+    if (!window.confirm(`¿Estás seguro de que deseas ${accion} la cuenta de "${usuarioNombre}"?`)) {
+      return;
+    }
+    setFormLoading(true);
+    setUserFormMessage({ type: '', text: '' });
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ estado: nuevoEstado })
+      .eq('id', usuarioId);
+
+    if (!error) {
+      setUserFormMessage({ 
+        type: 'success', 
+        text: `Usuario "${usuarioNombre}" ${nuevoEstado === 'deshabilitado' ? 'deshabilitado' : 'reactivado'} con éxito.` 
+      });
+      fetchUsuarios();
+      fetchStats();
+    } else {
+      setUserFormMessage({ type: 'error', text: 'Error al cambiar estado del usuario: ' + error.message });
+    }
+    setFormLoading(false);
+  };
+
+  // Create Dispositivo IoT (ESP32)
   const handleCreateDispositivo = async (e) => {
     e.preventDefault();
-    setFormLoading(true);
-    const payload = { ...newDispositivo };
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      payload.id_comunidad = userProfile.id_comunidad;
+    setDeviceFormMessage({ type: '', text: '' });
+
+    const macTrim = newDispositivo.mac_address.trim().toUpperCase();
+    const zonaTrim = newDispositivo.zona.trim();
+
+    if (!macTrim || !zonaTrim) {
+      setDeviceFormMessage({ type: 'error', text: 'La dirección MAC y la Zona son obligatorias.' });
+      return;
     }
+
+    let comId = null;
+    if (userProfile && userProfile.rol === 'admin') {
+      comId = userProfile.id_comunidad;
+    } else if (newDispositivo.id_comunidad) {
+      comId = Number(newDispositivo.id_comunidad);
+    }
+
+    let payload = {
+      mac_address: macTrim,
+      tipo: newDispositivo.tipo,
+      zona: zonaTrim,
+      estado: 'activo'
+    };
+
+    if (newDispositivo.tipo === 'sirena') {
+      if (!comId) {
+        setDeviceFormMessage({ type: 'error', text: 'Debes asociar la sirena a una comunidad.' });
+        return;
+      }
+      payload.id_comunidad = comId;
+      payload.id_usuario = null;
+      payload.latitud = null;
+      payload.longitud = null;
+    } else {
+      // Botón físico
+      if (!newDispositivo.id_usuario) {
+        setDeviceFormMessage({ type: 'error', text: 'Debes asociar el botón a un vecino responsable.' });
+        return;
+      }
+      payload.id_usuario = newDispositivo.id_usuario;
+      payload.id_comunidad = comId || null;
+      payload.latitud = newDispositivo.latitud ? parseFloat(newDispositivo.latitud) : null;
+      payload.longitud = newDispositivo.longitud ? parseFloat(newDispositivo.longitud) : null;
+    }
+
+    setFormLoading(true);
     const { error } = await supabase
       .from('dispositivos')
       .insert([payload]);
+
     if (!error) {
-      setNewDispositivo({ id_usuario: '', mac_address: '', tipo: 'sirena', id_comunidad: '' });
+      setDeviceFormMessage({ type: 'success', text: `Dispositivo ${macTrim} registrado con éxito.` });
+      setNewDispositivo({ 
+        mac_address: '', 
+        tipo: 'sirena', 
+        zona: '', 
+        id_comunidad: '', 
+        id_usuario: '', 
+        latitud: '', 
+        longitud: '', 
+        estado: 'activo' 
+      });
       fetchDispositivos();
       fetchStats();
     } else {
-      alert("Error al vincular dispositivo: " + error.message);
+      setDeviceFormMessage({ type: 'error', text: "Error al registrar dispositivo: " + error.message });
+    }
+    setFormLoading(false);
+  };
+
+  // Abrir formulario de edición de Dispositivo IoT
+  const openEditDispositivo = (dev) => {
+    setEditingDispositivo({
+      mac_address: dev.mac_address,
+      tipo: dev.tipo || 'sirena',
+      zona: dev.zona || '',
+      id_comunidad: dev.id_comunidad ? String(dev.id_comunidad) : '',
+      id_usuario: dev.id_usuario || '',
+      latitud: dev.latitud !== null && dev.latitud !== undefined ? String(dev.latitud) : '',
+      longitud: dev.longitud !== null && dev.longitud !== undefined ? String(dev.longitud) : '',
+      estado: dev.estado || 'activo'
+    });
+    setDeviceFormMessage({ type: '', text: '' });
+  };
+
+  // Update Dispositivo IoT
+  const handleUpdateDispositivo = async (e) => {
+    e.preventDefault();
+    if (!editingDispositivo) return;
+    setDeviceFormMessage({ type: '', text: '' });
+
+    const zonaTrim = editingDispositivo.zona.trim();
+    if (!zonaTrim) {
+      setDeviceFormMessage({ type: 'error', text: 'La zona / ubicación es obligatoria.' });
+      return;
+    }
+
+    let comId = null;
+    if (userProfile && userProfile.rol === 'admin') {
+      comId = userProfile.id_comunidad;
+    } else if (editingDispositivo.id_comunidad) {
+      comId = Number(editingDispositivo.id_comunidad);
+    }
+
+    let payload = {
+      tipo: editingDispositivo.tipo,
+      zona: zonaTrim,
+      estado: editingDispositivo.estado
+    };
+
+    if (editingDispositivo.tipo === 'sirena') {
+      if (!comId) {
+        setDeviceFormMessage({ type: 'error', text: 'Debes asociar la sirena a una comunidad.' });
+        return;
+      }
+      payload.id_comunidad = comId;
+      payload.id_usuario = null;
+      payload.latitud = null;
+      payload.longitud = null;
+    } else {
+      if (!editingDispositivo.id_usuario) {
+        setDeviceFormMessage({ type: 'error', text: 'Debes asociar el botón a un vecino responsable.' });
+        return;
+      }
+      payload.id_usuario = editingDispositivo.id_usuario;
+      payload.id_comunidad = comId || null;
+      payload.latitud = editingDispositivo.latitud ? parseFloat(editingDispositivo.latitud) : null;
+      payload.longitud = editingDispositivo.longitud ? parseFloat(editingDispositivo.longitud) : null;
+    }
+
+    setFormLoading(true);
+    const { error } = await supabase
+      .from('dispositivos')
+      .update(payload)
+      .eq('mac_address', editingDispositivo.mac_address);
+
+    if (!error) {
+      setEditingDispositivo(null);
+      setDeviceFormMessage({ type: 'success', text: `Dispositivo ${editingDispositivo.mac_address} actualizado.` });
+      fetchDispositivos();
+      fetchStats();
+    } else {
+      setDeviceFormMessage({ type: 'error', text: 'Error al actualizar dispositivo: ' + error.message });
+    }
+    setFormLoading(false);
+  };
+
+  // Toggle Dispositivo Estado (Borrado Lógico)
+  const handleToggleDispositivoEstado = async (macAddress, estadoActual) => {
+    const nuevoEstado = estadoActual === 'inactivo' ? 'activo' : 'inactivo';
+    const accion = nuevoEstado === 'inactivo' ? 'desactivar (borrado lógico)' : 'reactivar';
+    if (!window.confirm(`¿Estás seguro de que deseas ${accion} el dispositivo ${macAddress}?`)) {
+      return;
+    }
+    setFormLoading(true);
+    setDeviceFormMessage({ type: '', text: '' });
+    const { error } = await supabase
+      .from('dispositivos')
+      .update({ estado: nuevoEstado })
+      .eq('mac_address', macAddress);
+
+    if (!error) {
+      setDeviceFormMessage({ 
+        type: 'success', 
+        text: `Dispositivo ${macAddress} ${nuevoEstado === 'inactivo' ? 'desactivado' : 'reactivado'} con éxito.` 
+      });
+      fetchDispositivos();
+      fetchStats();
+    } else {
+      setDeviceFormMessage({ type: 'error', text: 'Error al cambiar estado del dispositivo: ' + error.message });
     }
     setFormLoading(false);
   };
@@ -521,7 +1015,7 @@ export default function App() {
 
 
       {/* Navigation Header */}
-      <header className="px-4 md:px-8 py-4 relative z-50">
+      <header className="px-4 md:px-8 py-4 relative z-[200]">
         <nav className="max-w-[95%] mx-auto glassmorphism rounded-2xl px-6 py-4 flex items-center justify-between">
           <a href="#" onClick={() => { setCurrentPage('home'); setMobileMenuOpen(false); }} className="flex items-center">
             <img src="images/image.png" alt="Eje Urbano Logo" className="h-10 w-auto object-contain rounded-xl" />
@@ -541,14 +1035,182 @@ export default function App() {
           <div className="flex items-center gap-4">
             <div className="hidden md:flex items-center gap-4">
               {user ? (
-                <div className="flex items-center gap-4">
-                  <button onClick={() => setCurrentPage('dashboard')} className="px-4 py-2 rounded-xl bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-xs font-semibold flex items-center gap-1.5">
-                    <LayoutDashboard className="w-3.5 h-3.5" />
-                    Panel Activo
-                  </button>
-                  <button onClick={handleLogout} className="text-gray-400 hover:text-red-400 transition-colors" title="Cerrar Sesión">
-                    <LogOut className="w-5 h-5" />
-                  </button>
+                <div className="flex items-center gap-3">
+                  {/* Botón rápido a Dashboard si no estamos en él */}
+                  {currentPage !== 'dashboard' && (
+                    <button 
+                      onClick={() => setCurrentPage('dashboard')} 
+                      className="px-3.5 py-2 rounded-xl bg-sky-950/80 text-[#00E5FF] border border-[#00E5FF]/30 hover:border-[#00E5FF] hover:bg-sky-900/60 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md shadow-cyan-950/30"
+                    >
+                      <LayoutDashboard className="w-3.5 h-3.5" />
+                      Ir al Panel
+                    </button>
+                  )}
+
+                  {/* Panel de Usuario Estético (Pill Trigger + Popover) */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setProfileOpen(!profileOpen)}
+                      className={`flex items-center gap-3 px-3 py-1.5 rounded-xl bg-[#090E1A]/90 border transition-all duration-200 shadow-lg cursor-pointer ${
+                        profileOpen 
+                          ? 'border-[#00E5FF] shadow-[0_0_15px_rgba(0,229,255,0.25)] bg-[#0c1322]' 
+                          : 'border-white/10 hover:border-[#00E5FF]/60 hover:bg-slate-800/80'
+                      }`}
+                      title="Ver información de perfil"
+                    >
+                      {/* Avatar con inicial */}
+                      <div className="relative">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] flex items-center justify-center font-black text-white text-xs shadow-inner ring-1 ring-[#00E5FF]/50">
+                          {userProfile?.nombre ? userProfile.nombre.charAt(0).toUpperCase() : (user?.email ? user.email.charAt(0).toUpperCase() : 'U')}
+                        </div>
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#090E1A] rounded-full"></span>
+                      </div>
+
+                      {/* Nombre y Rol */}
+                      <div className="text-left hidden lg:block pr-1">
+                        <div className="text-xs font-bold text-white tracking-wide max-w-[130px] truncate leading-tight">
+                          {userProfile?.nombre || user?.email?.split('@')[0]}
+                        </div>
+                        <div className="text-[10px] font-semibold text-[#00E5FF] uppercase tracking-wider flex items-center gap-1">
+                          <ShieldCheck className="w-2.5 h-2.5 flex-shrink-0" />
+                          <span className="truncate max-w-[90px]">
+                            {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                          </span>
+                        </div>
+                      </div>
+
+                      <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${profileOpen ? 'rotate-180 text-[#00E5FF]' : ''}`} />
+                    </button>
+
+                    {/* Backdrop para cerrar al hacer clic afuera */}
+                    {profileOpen && (
+                      <div 
+                        className="fixed inset-0 z-[190] bg-black/30 backdrop-blur-[1px]" 
+                        onClick={() => setProfileOpen(false)} 
+                      />
+                    )}
+
+                    {/* Popover / Menú Detallado del Perfil */}
+                    {profileOpen && (
+                      <div className="absolute right-0 top-full mt-3 w-80 sm:w-96 rounded-2xl bg-[#090E1A]/95 backdrop-blur-2xl border border-[#00E5FF]/40 shadow-[0_12px_45px_rgba(0,0,0,0.85),0_0_25px_rgba(0,229,255,0.2)] z-[200] p-5 text-white animate-fade-in divide-y divide-white/10">
+                        
+                        {/* Cabecera del Perfil */}
+                        <div className="pb-4 flex items-start gap-3.5">
+                          <div className="relative flex-shrink-0">
+                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] flex items-center justify-center font-black text-white text-xl shadow-lg shadow-cyan-500/20 ring-2 ring-[#00E5FF]/60">
+                              {userProfile?.nombre ? userProfile.nombre.charAt(0).toUpperCase() : (user?.email ? user.email.charAt(0).toUpperCase() : 'U')}
+                            </div>
+                            <span className="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-emerald-500 text-[9px] font-bold text-slate-950 rounded-full border-2 border-slate-900 flex items-center gap-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-pulse"></span>
+                              Online
+                            </span>
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-base font-bold text-white truncate">
+                              {userProfile?.nombre || 'Usuario Conectado'}
+                            </h4>
+                            <p className="text-xs text-gray-400 truncate flex items-center gap-1.5 mt-0.5">
+                              <Mail className="w-3 h-3 text-[#00E5FF]/80 flex-shrink-0" />
+                              <span className="truncate">{userProfile?.email || user?.email}</span>
+                            </p>
+                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                userProfile?.rol === 'superadmin'
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : userProfile?.rol === 'admin'
+                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              }`}>
+                                <ShieldCheck className="w-3 h-3" />
+                                {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                {userProfile?.estado === 'activo' ? 'Activo' : (userProfile?.estado || 'Activo')}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Tarjeta de Información Detallada */}
+                        <div className="py-4 space-y-2 text-xs">
+                          {/* Comunidad / Sector */}
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+                            <div className="flex items-center gap-2 text-gray-400">
+                              <Home className="w-3.5 h-3.5 text-[#00E5FF]" />
+                              <span>Comunidad:</span>
+                            </div>
+                            <span className="font-semibold text-gray-200 text-right truncate max-w-[180px]">
+                              {userProfile?.nombre_comunidad || (userProfile?.rol === 'superadmin' ? '🌐 Acceso Global (Todas)' : 'No asignada')}
+                            </span>
+                          </div>
+
+                          {/* Teléfono */}
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+                            <div className="flex items-center gap-2 text-gray-400">
+                              <Phone className="w-3.5 h-3.5 text-[#00E5FF]" />
+                              <span>Teléfono:</span>
+                            </div>
+                            <span className="font-semibold text-gray-200">
+                              {userProfile?.telefono || 'No registrado'}
+                            </span>
+                          </div>
+
+                          {/* Dirección */}
+                          <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+                            <div className="flex items-center gap-2 text-gray-400">
+                              <MapPin className="w-3.5 h-3.5 text-[#00E5FF]" />
+                              <span>Dirección:</span>
+                            </div>
+                            <span className="font-semibold text-gray-200 text-right truncate max-w-[180px]">
+                              {userProfile?.direccion || 'No registrada'}
+                            </span>
+                          </div>
+
+                          {/* Fecha de Registro */}
+                          {userProfile?.created_at && (
+                            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
+                              <div className="flex items-center gap-2 text-gray-400">
+                                <Calendar className="w-3.5 h-3.5 text-[#00E5FF]" />
+                                <span>Miembro desde:</span>
+                              </div>
+                              <span className="font-semibold text-gray-200">
+                                {new Date(userProfile.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Acciones del Perfil */}
+                        <div className="pt-3.5 flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setCurrentPage('dashboard');
+                              setProfileOpen(false);
+                            }}
+                            className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-sky-600/30 to-[#00E5FF]/20 hover:from-sky-600/50 hover:to-[#00E5FF]/40 border border-[#00E5FF]/40 text-[#00E5FF] hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-950/50 cursor-pointer"
+                          >
+                            <LayoutDashboard className="w-3.5 h-3.5" />
+                            {currentPage === 'dashboard' ? 'Panel Activo' : 'Ir al Panel'}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setProfileOpen(false);
+                              handleLogout();
+                            }}
+                            className="py-2.5 px-3 rounded-xl bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 hover:border-red-500/50 text-red-400 hover:text-red-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                            title="Cerrar Sesión"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            Salir
+                          </button>
+                        </div>
+
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <button onClick={() => setCurrentPage('login')} className="px-5 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-semibold text-sm transition-all duration-300 shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 hover:-translate-y-0.5">
@@ -582,6 +1244,25 @@ export default function App() {
             <div className="border-t border-white/5 pt-3 flex flex-col gap-3">
               {user ? (
                 <>
+                  {/* Tarjeta de Resumen de Usuario en Móvil */}
+                  <div className="p-3 rounded-xl bg-white/[0.04] border border-[#00E5FF]/20 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] flex items-center justify-center font-black text-white text-sm shadow-inner ring-1 ring-[#00E5FF]/40 flex-shrink-0">
+                      {userProfile?.nombre ? userProfile.nombre.charAt(0).toUpperCase() : (user?.email ? user.email.charAt(0).toUpperCase() : 'U')}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold text-white truncate">
+                        {userProfile?.nombre || user?.email?.split('@')[0]}
+                      </div>
+                      <div className="text-[11px] text-gray-400 truncate">
+                        {userProfile?.email || user?.email}
+                      </div>
+                      <div className="text-[10px] font-semibold text-[#00E5FF] uppercase tracking-wider flex items-center gap-1 mt-0.5">
+                        <ShieldCheck className="w-2.5 h-2.5" />
+                        {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                      </div>
+                    </div>
+                  </div>
+
                   <button onClick={() => { setCurrentPage('dashboard'); setMobileMenuOpen(false); }} className="w-full py-3 rounded-xl bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-sm font-semibold flex items-center justify-center gap-1.5">
                     <LayoutDashboard className="w-4 h-4" />
                     Panel Activo
@@ -1041,7 +1722,7 @@ export default function App() {
               <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-950 text-[#00E5FF] border border-[#00E5FF]/20 text-xs font-semibold">
                   <span className="w-2 h-2 rounded-full bg-[#00E5FF] animate-pulse"></span>
-                  Conexión Supabase (REST+WS) Activa
+                  Conexión activa
                 </span>
                 <button onClick={fetchStats} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 transition-colors" title="Refrescar">
                   <RefreshCw className="w-4 h-4" />
@@ -1053,11 +1734,15 @@ export default function App() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
               <div 
                 onClick={() => setDashboardTab('alertas')}
-                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'alertas' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'} ${stats.activeAlerts > 0 ? 'bg-red-500/10 border-red-500/30' : ''}`}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'alertas' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : `border border-white/5 opacity-80 hover:opacity-100 ${stats.activeAlerts > 0 ? 'bg-red-500/5 border-red-500/20' : ''}`
+                }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-semibold text-gray-400">Alertas Activas</span>
-                  <AlertTriangle className={`w-5 h-5 ${stats.activeAlerts > 0 ? 'text-red-500 animate-pulse' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-semibold ${dashboardTab === 'alertas' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Alertas Activas</span>
+                  <AlertTriangle className={`w-5 h-5 ${stats.activeAlerts > 0 ? 'text-red-500 animate-pulse' : dashboardTab === 'alertas' ? 'text-[#00E5FF]' : 'text-gray-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
                   {stats.activeAlerts}
@@ -1068,42 +1753,74 @@ export default function App() {
                   )}
                 </h3>
                 <p className="text-xs text-gray-400 mt-2">Emergencias que requieren atención</p>
+                {dashboardTab === 'alertas' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
               </div>
 
               <div 
                 onClick={() => setDashboardTab('usuarios')}
-                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'usuarios' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'usuarios' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : 'border border-white/5 opacity-80 hover:opacity-100'
+                }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-semibold text-gray-400">Vecinos</span>
-                  <Users className="w-5 h-5 text-emerald-400" />
+                  <span className={`text-sm font-semibold ${dashboardTab === 'usuarios' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Vecinos</span>
+                  <Users className={`w-5 h-5 ${dashboardTab === 'usuarios' ? 'text-[#00E5FF]' : 'text-emerald-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white">{stats.totalUsers}</h3>
                 <p className="text-xs text-gray-400 mt-2">Usuarios registrados en el sistema</p>
+                {dashboardTab === 'usuarios' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
               </div>
 
               <div 
                 onClick={() => setDashboardTab('dispositivos')}
-                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'dispositivos' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'dispositivos' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : 'border border-white/5 opacity-80 hover:opacity-100'
+                }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-semibold text-gray-400">Dispositivos IoT</span>
-                  <Cpu className="w-5 h-5 text-amber-400" />
+                  <span className={`text-sm font-semibold ${dashboardTab === 'dispositivos' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Dispositivos IoT</span>
+                  <Cpu className={`w-5 h-5 ${dashboardTab === 'dispositivos' ? 'text-[#00E5FF]' : 'text-amber-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white">{stats.totalDevices}</h3>
                 <p className="text-xs text-gray-400 mt-2">Sirenas y Botones físicos activos</p>
+                {dashboardTab === 'dispositivos' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
               </div>
 
               <div 
                 onClick={() => setDashboardTab('comunidades')}
-                className={`p-6 rounded-2xl glass-card border transition-all cursor-pointer hover:-translate-y-1 ${dashboardTab === 'comunidades' ? 'border-[#00E5FF] bg-sky-950/20' : 'border-white/5'}`}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'comunidades' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : 'border border-white/5 opacity-80 hover:opacity-100'
+                }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-semibold text-gray-400">Comunidades</span>
-                  <Home className="w-5 h-5 text-sky-400" />
+                  <span className={`text-sm font-semibold ${dashboardTab === 'comunidades' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Comunidades</span>
+                  <Home className={`w-5 h-5 ${dashboardTab === 'comunidades' ? 'text-[#00E5FF]' : 'text-sky-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white">{stats.totalCommunities}</h3>
                 <p className="text-xs text-gray-400 mt-2">Barrios organizados activos</p>
+                {dashboardTab === 'comunidades' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1114,7 +1831,7 @@ export default function App() {
                 {/* Active Alerts Live Map */}
                 <div className="rounded-2xl border border-white/5 overflow-hidden h-[550px] relative glow-cyan flex flex-col">
                   {/* Theme Selector Overlay */}
-                  <div className="absolute top-3 right-3 z-[1010] bg-slate-900/90 border border-white/10 rounded-xl p-1 flex gap-1 shadow-lg backdrop-blur-md">
+                  <div className="absolute top-3 right-3 z-20 bg-slate-900/90 border border-white/10 rounded-xl p-1 flex gap-1 shadow-lg backdrop-blur-md">
                     <button 
                       onClick={() => setMapTheme('dark')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${mapTheme === 'dark' ? 'bg-[#00E5FF] text-slate-950 font-bold' : 'text-gray-400 hover:text-white'}`}
@@ -1150,7 +1867,7 @@ export default function App() {
                     }}
                   />
                   {stats.activeAlerts === 0 && (
-                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-[1000]">
+                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-10">
                       <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4">
                         <CheckCircle className="w-6 h-6" />
                       </div>
@@ -1278,66 +1995,173 @@ export default function App() {
             {/* Tab content 2: Usuarios */}
             {dashboardTab === 'usuarios' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Form to create user */}
+                {/* Form to create/edit user */}
                 <div className="glassmorphism p-6 rounded-2xl h-fit border border-white/5">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                    <UserPlus className="text-[#00E5FF]" />
-                    Registrar Vecino
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <UserPlus className="text-[#00E5FF]" />
+                      {editingUsuario ? 'Editar Usuario' : 'Registrar Usuario'}
+                    </span>
+                    {editingUsuario && (
+                      <button 
+                        type="button"
+                        onClick={() => setEditingUsuario(null)}
+                        className="text-xs text-gray-400 hover:text-white font-normal"
+                      >
+                        Cancelar
+                      </button>
+                    )}
                   </h3>
-                  <form onSubmit={handleCreateUsuario} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">ID único (UUID de Supabase auth)</label>
-                      <input 
-                        type="text" 
-                        required 
-                        value={newUsuario.id}
-                        onChange={(e) => setNewUsuario({ ...newUsuario, id: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
-                        placeholder="a0b1c2..."
-                      />
+
+                  {userFormMessage.text && (
+                    <div className={`p-3 rounded-xl mb-4 text-xs font-semibold flex items-center gap-2 ${
+                      userFormMessage.type === 'error' 
+                        ? 'bg-red-500/10 border border-red-500/20 text-red-400' 
+                        : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {userFormMessage.type === 'error' ? '⚠️' : '✅'} {userFormMessage.text}
                     </div>
+                  )}
+
+                  <form onSubmit={editingUsuario ? handleUpdateUsuario : handleCreateUsuario} className="space-y-4">
+                    {/* Nombre Completo */}
                     <div>
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre Completo</label>
                       <input 
                         type="text" 
                         required 
-                        value={newUsuario.nombre}
-                        onChange={(e) => setNewUsuario({ ...newUsuario, nombre: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
-                        placeholder="Juan Perez"
+                        value={editingUsuario ? editingUsuario.nombre : newUsuario.nombre}
+                        onChange={(e) => editingUsuario 
+                          ? setEditingUsuario({ ...editingUsuario, nombre: e.target.value })
+                          : setNewUsuario({ ...newUsuario, nombre: e.target.value })
+                        }
+                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                        placeholder="Ej. Juan Pérez"
                       />
                     </div>
+
+                    {/* Correo Electrónico (Solo al crear) */}
+                    {!editingUsuario && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo Electrónico</label>
+                        <input 
+                          type="email" 
+                          required 
+                          value={newUsuario.email}
+                          onChange={(e) => setNewUsuario({ ...newUsuario, email: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                          placeholder="correo@ejemplo.com"
+                        />
+                      </div>
+                    )}
+
+                    {/* Contraseña con Ojo para Ver/Ocultar (Solo al crear) */}
+                    {!editingUsuario && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Contraseña</label>
+                        <div className="relative">
+                          <input 
+                            type={showUserPassword ? "text" : "password"} 
+                            required 
+                            value={newUsuario.password}
+                            onChange={(e) => setNewUsuario({ ...newUsuario, password: e.target.value })}
+                            className="w-full px-4 py-2.5 pr-11 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                            placeholder="Mín. 6 car., 1 Mayús., 1 Núm."
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowUserPassword(!showUserPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors"
+                          >
+                            {showUserPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dirección Domiciliaria */}
                     <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Rol</label>
-                      <select 
-                        value={newUsuario.rol} 
-                        onChange={(e) => setNewUsuario({ ...newUsuario, rol: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
-                      >
-                        <option value="vecino">Vecino</option>
-                        <option value="admin">Administrador</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Dirección</label>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Dirección Domiciliaria</label>
                       <input 
                         type="text" 
                         required 
-                        value={newUsuario.direccion}
-                        onChange={(e) => setNewUsuario({ ...newUsuario, direccion: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
+                        value={editingUsuario ? editingUsuario.direccion : newUsuario.direccion}
+                        onChange={(e) => editingUsuario
+                          ? setEditingUsuario({ ...editingUsuario, direccion: e.target.value })
+                          : setNewUsuario({ ...newUsuario, direccion: e.target.value })
+                        }
+                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
                         placeholder="Calle Florida #123"
                       />
                     </div>
+
+                    {/* Número de Celular con Selector de País */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Número de Celular</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={editingUsuario ? editingUsuario.countryCode : newUsuario.countryCode}
+                          onChange={(e) => editingUsuario
+                            ? setEditingUsuario({ ...editingUsuario, countryCode: e.target.value })
+                            : setNewUsuario({ ...newUsuario, countryCode: e.target.value })
+                          }
+                          className="w-28 px-2 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-xs focus:border-[#00E5FF] outline-none transition-all"
+                        >
+                          {countryCodes.map((c) => (
+                            <option key={c.code} value={c.code}>
+                              {c.flag} {c.code}
+                            </option>
+                          ))}
+                        </select>
+                        <input 
+                          type="tel" 
+                          required 
+                          value={editingUsuario ? editingUsuario.phoneNo : newUsuario.phoneNo}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            if (editingUsuario) {
+                              setEditingUsuario({ ...editingUsuario, phoneNo: val });
+                            } else {
+                              setNewUsuario({ ...newUsuario, phoneNo: val });
+                            }
+                          }}
+                          className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                          placeholder="71234567"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Rol de Usuario */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Rol del Usuario</label>
+                      <select 
+                        value={editingUsuario ? editingUsuario.rol : newUsuario.rol} 
+                        onChange={(e) => editingUsuario
+                          ? setEditingUsuario({ ...editingUsuario, rol: e.target.value })
+                          : setNewUsuario({ ...newUsuario, rol: e.target.value })
+                        }
+                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                      >
+                        <option value="vecino">Vecino</option>
+                        <option value="admin">Administrador Local</option>
+                        {userProfile && userProfile.rol === 'super_admin' && (
+                          <option value="super_admin">Super Administrador Global</option>
+                        )}
+                      </select>
+                    </div>
+
                     {/* If super_admin, show community selection. If admin, it is auto-bound to their community */}
                     {userProfile && userProfile.rol === 'super_admin' ? (
                       <div>
                         <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Asignar a Comunidad</label>
                         <select 
-                          required
-                          value={newUsuario.id_comunidad} 
-                          onChange={(e) => setNewUsuario({ ...newUsuario, id_comunidad: e.target.value })}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
+                          required={editingUsuario ? editingUsuario.rol !== 'super_admin' : newUsuario.rol !== 'super_admin'}
+                          value={editingUsuario ? editingUsuario.id_comunidad : newUsuario.id_comunidad} 
+                          onChange={(e) => editingUsuario
+                            ? setEditingUsuario({ ...editingUsuario, id_comunidad: e.target.value })
+                            : setNewUsuario({ ...newUsuario, id_comunidad: e.target.value })
+                          }
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
                         >
                           <option value="">Seleccione una comunidad</option>
                           {comunidades.map(com => (
@@ -1350,22 +2174,74 @@ export default function App() {
                         Comunidad vinculada automáticamente: <strong className="text-white">{userProfile?.nombre_comunidad || 'Cargando...'}</strong>
                       </div>
                     )}
-                    <button type="submit" disabled={formLoading} className="w-full py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all">
-                      Registrar Vecino
-                    </button>
+
+                    {/* Estado de la cuenta al editar */}
+                    {editingUsuario && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Estado de la Cuenta</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingUsuario({ ...editingUsuario, estado: 'activo' })}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                              editingUsuario.estado === 'activo'
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                                : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            ✅ Habilitado
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingUsuario({ ...editingUsuario, estado: 'deshabilitado' })}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                              editingUsuario.estado === 'deshabilitado'
+                                ? 'bg-red-500/20 border-red-500 text-red-400'
+                                : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            🚫 Deshabilitado
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-2">
+                      <button 
+                        type="submit" 
+                        disabled={formLoading} 
+                        className="flex-1 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-cyan-500/10 disabled:opacity-50"
+                      >
+                        {formLoading ? 'Guardando...' : (editingUsuario ? 'Guardar Cambios' : 'Registrar Usuario')}
+                      </button>
+                      {editingUsuario && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingUsuario(null)}
+                          className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold text-sm transition-all"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
                   </form>
                 </div>
 
                 {/* Users List */}
                 <div className="lg:col-span-2 glassmorphism rounded-2xl border border-white/5 overflow-hidden">
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5">
+                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5 sticky top-0 z-10">
                         <tr>
                           <th className="px-6 py-4">Vecino</th>
                           <th className="px-6 py-4">Rol</th>
+                          <th className="px-6 py-4">Celular</th>
                           <th className="px-6 py-4">Dirección</th>
                           <th className="px-6 py-4">Comunidad</th>
+                          <th className="px-6 py-4">Estado</th>
+                          {userProfile && ['admin', 'super_admin'].includes(userProfile.rol) && (
+                            <th className="px-6 py-4 text-right">Acciones</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
@@ -1373,12 +2249,52 @@ export default function App() {
                           <tr key={usu.id} className="hover:bg-slate-900/40 transition-colors">
                             <td className="px-6 py-4 font-semibold text-white">{usu.nombre}</td>
                             <td className="px-6 py-4">
-                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${usu.rol === 'admin' ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                                {usu.rol}
+                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                usu.rol === 'super_admin'
+                                  ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                  : usu.rol === 'admin'
+                                    ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              }`}>
+                                {usu.rol === 'super_admin' ? 'Super Admin' : usu.rol === 'admin' ? 'Admin' : 'Vecino'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-gray-300">{usu.direccion}</td>
+                            <td className="px-6 py-4 text-cyan-400 font-mono text-xs">{usu.telefono || '—'}</td>
+                            <td className="px-6 py-4 text-gray-300">{usu.direccion || '—'}</td>
                             <td className="px-6 py-4 text-gray-400">{usu.comunidad?.nombre || 'General'}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                usu.estado === 'deshabilitado'
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              }`}>
+                                {usu.estado === 'deshabilitado' ? 'DESHABILITADO' : 'ACTIVO'}
+                              </span>
+                            </td>
+                            {userProfile && ['admin', 'super_admin'].includes(userProfile.rol) && (
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => openEditUsuario(usu)}
+                                    className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors"
+                                    title="Editar usuario"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleUsuarioEstado(usu.id, usu.estado || 'activo', usu.nombre)}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      usu.estado === 'deshabilitado'
+                                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                                        : 'bg-red-500/10 hover:bg-red-500/20 text-red-400'
+                                    }`}
+                                    title={usu.estado === 'deshabilitado' ? "Reactivar usuario" : "Deshabilitar usuario (borrado lógico)"}
+                                  >
+                                    {usu.estado === 'deshabilitado' ? <RefreshCw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -1391,52 +2307,126 @@ export default function App() {
             {/* Tab content 3: Comunidades */}
             {dashboardTab === 'comunidades' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Form to create Comunidad */}
+                {/* Form to create/edit Comunidad */}
                 <div className="glassmorphism p-6 rounded-2xl h-fit border border-white/5">
-                  <h3 className="text-lg font-bold text-white mb-4">Añadir Comunidad</h3>
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center justify-between">
+                    <span>{editingComunidad ? 'Editar Comunidad' : 'Añadir Comunidad'}</span>
+                    {editingComunidad && (
+                      <button 
+                        onClick={() => setEditingComunidad(null)}
+                        className="text-xs text-gray-400 hover:text-white font-normal"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                  </h3>
+
+                  {comunidadFormMessage.text && (
+                    <div className={`p-3 rounded-xl mb-4 text-xs font-semibold flex items-center gap-2 ${
+                      comunidadFormMessage.type === 'error' 
+                        ? 'bg-red-500/10 border border-red-500/20 text-red-400' 
+                        : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {comunidadFormMessage.type === 'error' ? '⚠️' : '✅'} {comunidadFormMessage.text}
+                    </div>
+                  )}
+
                   {userProfile && userProfile.rol === 'super_admin' ? (
-                    <form onSubmit={handleCreateComunidad} className="space-y-4">
+                    <form onSubmit={editingComunidad ? handleUpdateComunidad : handleCreateComunidad} className="space-y-4">
                       <div>
-                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre del Sector</label>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Nombre del Sector / Barrio</label>
                         <input 
                           type="text" 
                           required 
-                          value={newComunidad.nombre}
-                          onChange={(e) => setNewComunidad({ ...newComunidad, nombre: e.target.value })}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
+                          value={editingComunidad ? editingComunidad.nombre : newComunidad.nombre}
+                          onChange={(e) => editingComunidad 
+                            ? setEditingComunidad({ ...editingComunidad, nombre: e.target.value })
+                            : setNewComunidad({ ...newComunidad, nombre: e.target.value })
+                          }
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
                           placeholder="Barrio Central"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Descripción</label>
                         <textarea 
-                          required 
-                          value={newComunidad.descripcion}
-                          onChange={(e) => setNewComunidad({ ...newComunidad, descripcion: e.target.value })}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm h-24"
+                          value={editingComunidad ? (editingComunidad.descripcion || '') : newComunidad.descripcion}
+                          onChange={(e) => editingComunidad
+                            ? setEditingComunidad({ ...editingComunidad, descripcion: e.target.value })
+                            : setNewComunidad({ ...newComunidad, descripcion: e.target.value })
+                          }
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm h-24 focus:border-[#00E5FF] outline-none transition-all"
                           placeholder="Descripción y límites del barrio..."
                         />
                       </div>
-                      <button type="submit" disabled={formLoading} className="w-full py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all">
-                        Crear Comunidad
-                      </button>
+                      {editingComunidad && (
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Estado de la Comunidad</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingComunidad({ ...editingComunidad, estado: 'activo' })}
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                                (editingComunidad.estado || 'activo') === 'activo'
+                                  ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                                  : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              ✅ Activa
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingComunidad({ ...editingComunidad, estado: 'inactivo' })}
+                              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                                editingComunidad.estado === 'inactivo'
+                                  ? 'bg-red-500/20 border-red-500 text-red-400'
+                                  : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              🚫 Inactiva
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button 
+                          type="submit" 
+                          disabled={formLoading} 
+                          className="flex-1 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-cyan-500/10 disabled:opacity-50"
+                        >
+                          {formLoading ? 'Guardando...' : (editingComunidad ? 'Guardar Cambios' : 'Crear Comunidad')}
+                        </button>
+                        {editingComunidad && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingComunidad(null)}
+                            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold text-sm transition-all"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
                     </form>
                   ) : (
                     <div className="p-4 rounded-xl bg-slate-900/60 border border-white/5 text-sm text-gray-400 leading-relaxed">
-                      Como administrador de sector, solo puedes ver la información de tu comunidad asignada. La creación de nuevos sectores barriales está restringida para el Super Administrador.
+                      Como administrador de sector, solo puedes ver la información de tu comunidad asignada. La creación y edición de nuevos sectores barriales está restringida para el Super Administrador.
                     </div>
                   )}
                 </div>
 
                 {/* Communities list */}
                 <div className="lg:col-span-2 glassmorphism rounded-2xl border border-white/5 overflow-hidden">
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5">
+                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5 sticky top-0 z-10">
                         <tr>
                           <th className="px-6 py-4">ID</th>
                           <th className="px-6 py-4">Nombre</th>
                           <th className="px-6 py-4">Descripción</th>
+                          <th className="px-6 py-4">Estado</th>
+                          {userProfile && userProfile.rol === 'super_admin' && (
+                            <th className="px-6 py-4 text-right">Acciones</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
@@ -1444,7 +2434,45 @@ export default function App() {
                           <tr key={com.id} className="hover:bg-slate-900/40 transition-colors">
                             <td className="px-6 py-4 text-xs font-mono text-gray-400">{com.id}</td>
                             <td className="px-6 py-4 font-semibold text-white">{com.nombre}</td>
-                            <td className="px-6 py-4 text-gray-300">{com.descripcion}</td>
+                            <td className="px-6 py-4 text-gray-300">{com.descripcion || 'Sin descripción'}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                com.estado === 'inactivo'
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              }`}>
+                                {com.estado === 'inactivo' ? 'INACTIVA' : 'ACTIVA'}
+                              </span>
+                            </td>
+                            {userProfile && userProfile.rol === 'super_admin' && (
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => setEditingComunidad({ 
+                                      id: com.id, 
+                                      nombre: com.nombre, 
+                                      descripcion: com.descripcion || '',
+                                      estado: com.estado || 'activo'
+                                    })}
+                                    className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors"
+                                    title="Editar comunidad"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleComunidadEstado(com.id, com.estado || 'activo', com.nombre)}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      com.estado === 'inactivo'
+                                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                                        : 'bg-red-500/10 hover:bg-red-500/20 text-red-400'
+                                    }`}
+                                    title={com.estado === 'inactivo' ? "Reactivar comunidad" : "Desactivar comunidad (borrado lógico)"}
+                                  >
+                                    {com.estado === 'inactivo' ? <RefreshCw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -1454,99 +2482,318 @@ export default function App() {
               </div>
             )}
 
-            {/* Tab content 4: Dispositivos */}
+            {/* Tab content 4: Dispositivos IoT (ESP32) */}
             {dashboardTab === 'dispositivos' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Form to create device */}
+                {/* Form to create/edit device */}
                 <div className="glassmorphism p-6 rounded-2xl h-fit border border-white/5">
-                  <h3 className="text-lg font-bold text-white mb-4">Vincular Dispositivo IoT</h3>
-                  <form onSubmit={handleCreateDispositivo} className="space-y-4">
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <Radio className="text-[#00E5FF]" />
+                      {editingDispositivo ? 'Editar Dispositivo IoT' : 'Registrar Dispositivo IoT'}
+                    </span>
+                    {editingDispositivo && (
+                      <button 
+                        type="button"
+                        onClick={() => setEditingDispositivo(null)}
+                        className="text-xs text-gray-400 hover:text-white font-normal"
+                      >
+                        Cancelar
+                      </button>
+                    )}
+                  </h3>
+
+                  {deviceFormMessage.text && (
+                    <div className={`p-3 rounded-xl mb-4 text-xs font-semibold flex items-center gap-2 ${
+                      deviceFormMessage.type === 'error' 
+                        ? 'bg-red-500/10 border border-red-500/20 text-red-400' 
+                        : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {deviceFormMessage.type === 'error' ? '⚠️' : '✅'} {deviceFormMessage.text}
+                    </div>
+                  )}
+
+                  <form onSubmit={editingDispositivo ? handleUpdateDispositivo : handleCreateDispositivo} className="space-y-4">
+                    {/* MAC Address */}
                     <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">MAC Address Física</label>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                        Dirección MAC (ESP32) {editingDispositivo && '(Identificador Fijo)'}
+                      </label>
                       <input 
                         type="text" 
                         required 
-                        value={newDispositivo.mac_address}
-                        onChange={(e) => setNewDispositivo({ ...newDispositivo, mac_address: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
+                        disabled={!!editingDispositivo}
+                        value={editingDispositivo ? editingDispositivo.mac_address : newDispositivo.mac_address}
+                        onChange={(e) => !editingDispositivo && setNewDispositivo({ ...newDispositivo, mac_address: e.target.value.toUpperCase() })}
+                        className={`w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white font-mono text-sm focus:border-[#00E5FF] outline-none transition-all ${
+                          editingDispositivo ? 'opacity-60 cursor-not-allowed' : ''
+                        }`}
                         placeholder="AA:BB:CC:DD:EE:FF"
                       />
                     </div>
+
+                    {/* Zona / Ubicación descriptiva */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Zona / Ubicación Descriptiva</label>
+                      <input 
+                        type="text" 
+                        required 
+                        value={editingDispositivo ? editingDispositivo.zona : newDispositivo.zona}
+                        onChange={(e) => editingDispositivo 
+                          ? setEditingDispositivo({ ...editingDispositivo, zona: e.target.value })
+                          : setNewDispositivo({ ...newDispositivo, zona: e.target.value })
+                        }
+                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                        placeholder="Ej. Poste Esquina Norte / Domicilio #45"
+                      />
+                    </div>
+
+                    {/* Tipo de Dispositivo */}
                     <div>
                       <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tipo de Dispositivo</label>
-                      <select 
-                        value={newDispositivo.tipo} 
-                        onChange={(e) => setNewDispositivo({ ...newDispositivo, tipo: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
-                      >
-                        <option value="sirena">Sirena</option>
-                        <option value="boton_panico">Botón de Pánico</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Asignar a Vecino Responsable</label>
-                      <select 
-                        required
-                        value={newDispositivo.id_usuario} 
-                        onChange={(e) => setNewDispositivo({ ...newDispositivo, id_usuario: e.target.value })}
-                        className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
-                      >
-                        <option value="">Seleccione un vecino</option>
-                        {usuarios.map(u => (
-                          <option key={u.id} value={u.id}>{u.nombre}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {/* If super_admin, show community selection. If admin, it is auto-bound */}
-                    {userProfile && userProfile.rol === 'super_admin' ? (
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Asignar a Comunidad</label>
-                        <select 
-                          required
-                          value={newDispositivo.id_comunidad} 
-                          onChange={(e) => setNewDispositivo({ ...newDispositivo, id_comunidad: e.target.value })}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm"
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => editingDispositivo 
+                            ? setEditingDispositivo({ ...editingDispositivo, tipo: 'sirena' })
+                            : setNewDispositivo({ ...newDispositivo, tipo: 'sirena' })
+                          }
+                          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                            (editingDispositivo ? editingDispositivo.tipo : newDispositivo.tipo) === 'sirena'
+                              ? 'bg-[#1E88E5]/20 border-[#00E5FF] text-[#00E5FF]'
+                              : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                          }`}
                         >
-                          <option value="">Seleccione una comunidad</option>
-                          {comunidades.map(com => (
-                            <option key={com.id} value={com.id}>{com.nombre}</option>
-                          ))}
-                        </select>
+                          📢 Sirena Comunitaria
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => editingDispositivo 
+                            ? setEditingDispositivo({ ...editingDispositivo, tipo: 'boton' })
+                            : setNewDispositivo({ ...newDispositivo, tipo: 'boton' })
+                          }
+                          className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                            (editingDispositivo ? editingDispositivo.tipo : newDispositivo.tipo) === 'boton'
+                              ? 'bg-[#1E88E5]/20 border-[#00E5FF] text-[#00E5FF]'
+                              : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                          }`}
+                        >
+                          🔘 Botón de Vecino
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Condicional según tipo: Sirena -> Comunidad, Botón -> Vecino + Coordenadas */}
+                    {(editingDispositivo ? editingDispositivo.tipo : newDispositivo.tipo) === 'sirena' ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Asociar a Comunidad</label>
+                        {userProfile && userProfile.rol === 'super_admin' ? (
+                          <select 
+                            required
+                            value={editingDispositivo ? editingDispositivo.id_comunidad : newDispositivo.id_comunidad} 
+                            onChange={(e) => editingDispositivo
+                              ? setEditingDispositivo({ ...editingDispositivo, id_comunidad: e.target.value })
+                              : setNewDispositivo({ ...newDispositivo, id_comunidad: e.target.value })
+                            }
+                            className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                          >
+                            <option value="">Seleccione una comunidad</option>
+                            {comunidades.map(com => (
+                              <option key={com.id} value={com.id}>{com.nombre}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-slate-900 border border-gray-800/60 text-xs text-gray-400">
+                            Comunidad vinculada: <strong className="text-white">{userProfile?.nombre_comunidad || 'Cargando...'}</strong>
+                          </div>
+                        )}
                       </div>
                     ) : (
-                      <div className="p-3 rounded-xl bg-slate-900 border border-gray-800/60 text-xs text-gray-400">
-                        Comunidad vinculada automáticamente: <strong className="text-white">{userProfile?.nombre_comunidad || 'Cargando...'}</strong>
+                      <>
+                        {/* Selector de Vecino Responsable */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Asociar a Vecino Responsable</label>
+                          <select 
+                            required
+                            value={editingDispositivo ? editingDispositivo.id_usuario : newDispositivo.id_usuario} 
+                            onChange={(e) => {
+                              const selectedUser = usuarios.find(u => u.id === e.target.value);
+                              if (editingDispositivo) {
+                                setEditingDispositivo({ 
+                                  ...editingDispositivo, 
+                                  id_usuario: e.target.value,
+                                  id_comunidad: selectedUser?.id_comunidad || editingDispositivo.id_comunidad
+                                });
+                              } else {
+                                setNewDispositivo({ 
+                                  ...newDispositivo, 
+                                  id_usuario: e.target.value,
+                                  id_comunidad: selectedUser?.id_comunidad || newDispositivo.id_comunidad
+                                });
+                              }
+                            }}
+                            className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-gray-800 text-white text-sm focus:border-[#00E5FF] outline-none transition-all"
+                          >
+                            <option value="">Seleccione un vecino</option>
+                            {usuarios.map(u => (
+                              <option key={u.id} value={u.id}>
+                                {u.nombre} ({u.comunidad?.nombre || 'General'})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Coordenadas fijas de instalación del botón */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Coordenadas de Instalación (GPS)</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input 
+                              type="number" 
+                              step="any"
+                              value={editingDispositivo ? editingDispositivo.latitud : newDispositivo.latitud}
+                              onChange={(e) => editingDispositivo
+                                ? setEditingDispositivo({ ...editingDispositivo, latitud: e.target.value })
+                                : setNewDispositivo({ ...newDispositivo, latitud: e.target.value })
+                              }
+                              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-gray-800 text-white font-mono text-xs focus:border-[#00E5FF] outline-none"
+                              placeholder="Latitud (-17.3895)"
+                            />
+                            <input 
+                              type="number" 
+                              step="any"
+                              value={editingDispositivo ? editingDispositivo.longitud : newDispositivo.longitud}
+                              onChange={(e) => editingDispositivo
+                                ? setEditingDispositivo({ ...editingDispositivo, longitud: e.target.value })
+                                : setNewDispositivo({ ...newDispositivo, longitud: e.target.value })
+                              }
+                              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-gray-800 text-white font-mono text-xs focus:border-[#00E5FF] outline-none"
+                              placeholder="Longitud (-66.1568)"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Estado del dispositivo al editar */}
+                    {editingDispositivo && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Estado del Dispositivo</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingDispositivo({ ...editingDispositivo, estado: 'activo' })}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                              editingDispositivo.estado === 'activo'
+                                ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                                : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            ✅ Activo (Operativo)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingDispositivo({ ...editingDispositivo, estado: 'inactivo' })}
+                            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                              editingDispositivo.estado === 'inactivo'
+                                ? 'bg-red-500/20 border-red-500 text-red-400'
+                                : 'bg-slate-900 border-gray-800 text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            🚫 Inactivo (Desactivado)
+                          </button>
+                        </div>
                       </div>
                     )}
-                    <button type="submit" disabled={formLoading} className="w-full py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all">
-                      Vincular Hardware
-                    </button>
+
+                    <div className="flex gap-2 pt-2">
+                      <button 
+                        type="submit" 
+                        disabled={formLoading} 
+                        className="flex-1 py-2.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-cyan-500/10 disabled:opacity-50"
+                      >
+                        {formLoading ? 'Guardando...' : (editingDispositivo ? 'Guardar Cambios' : 'Registrar Dispositivo IoT')}
+                      </button>
+                      {editingDispositivo && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingDispositivo(null)}
+                          className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold text-sm transition-all"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
                   </form>
                 </div>
 
                 {/* Devices list */}
                 <div className="lg:col-span-2 glassmorphism rounded-2xl border border-white/5 overflow-hidden">
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
                     <table className="w-full text-left text-sm">
-                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5">
+                      <thead className="bg-slate-900 text-gray-400 uppercase text-xs border-b border-white/5 sticky top-0 z-10">
                         <tr>
                           <th className="px-6 py-4">MAC Address</th>
                           <th className="px-6 py-4">Tipo</th>
-                          <th className="px-6 py-4">Propietario / Responsable</th>
-                          <th className="px-6 py-4">Comunidad</th>
+                          <th className="px-6 py-4">Zona / Ubicación</th>
+                          <th className="px-6 py-4">Asignado a</th>
+                          <th className="px-6 py-4">Estado</th>
+                          {userProfile && ['admin', 'super_admin'].includes(userProfile.rol) && (
+                            <th className="px-6 py-4 text-right">Acciones</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
                         {dispositivos.map((dev) => (
-                          <tr key={dev.id} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="px-6 py-4 font-mono text-white font-semibold">{dev.mac_address}</td>
+                          <tr key={dev.mac_address} className="hover:bg-slate-900/40 transition-colors">
+                            <td className="px-6 py-4 font-mono text-white font-semibold text-xs">{dev.mac_address}</td>
                             <td className="px-6 py-4">
-                              <span className="px-2 py-0.5 rounded text-xs bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20">
-                                {dev.tipo}
+                              <span className={`px-2 py-0.5 rounded text-xs font-bold border ${
+                                dev.tipo === 'sirena'
+                                  ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
+                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                              }`}>
+                                {dev.tipo === 'sirena' ? '📢 Sirena' : '🔘 Botón'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-gray-300">{dev.usuario?.nombre || 'No asignado'}</td>
-                            <td className="px-6 py-4 text-gray-400">{dev.comunidad?.nombre || 'General'}</td>
+                            <td className="px-6 py-4 text-gray-300 text-xs">{dev.zona || '—'}</td>
+                            <td className="px-6 py-4 text-gray-400 text-xs">
+                              {dev.tipo === 'sirena' 
+                                ? `Comunidad: ${dev.comunidad?.nombre || 'General'}`
+                                : `Vecino: ${dev.usuario?.nombre || 'Sin asignar'}`}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                                dev.estado === 'inactivo'
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              }`}>
+                                {dev.estado ? dev.estado.toUpperCase() : 'ACTIVO'}
+                              </span>
+                            </td>
+                            {userProfile && ['admin', 'super_admin'].includes(userProfile.rol) && (
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => openEditDispositivo(dev)}
+                                    className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors"
+                                    title="Editar dispositivo"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleDispositivoEstado(dev.mac_address, dev.estado || 'activo')}
+                                    className={`p-1.5 rounded-lg transition-colors ${
+                                      dev.estado === 'inactivo'
+                                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                                        : 'bg-red-500/10 hover:bg-red-500/20 text-red-400'
+                                    }`}
+                                    title={dev.estado === 'inactivo' ? "Reactivar dispositivo" : "Desactivar dispositivo (borrado lógico)"}
+                                  >
+                                    {dev.estado === 'inactivo' ? <RefreshCw className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>

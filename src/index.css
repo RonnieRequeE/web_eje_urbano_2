@@ -56,6 +56,19 @@ html, body {
   box-shadow: 0 20px 40px -15px rgba(0, 229, 255, 0.2);
 }
 
+.glass-card-active {
+  transform: translateY(-4px);
+  border-color: #00E5FF !important;
+  background: rgba(30, 41, 59, 0.75) !important;
+  box-shadow: 0 15px 35px -10px rgba(0, 229, 255, 0.35), 0 0 15px rgba(0, 229, 255, 0.25) !important;
+}
+
+.glass-card-active:hover {
+  transform: translateY(-6px);
+  border-color: #00E5FF !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 229, 255, 0.45), 0 0 20px rgba(0, 229, 255, 0.3) !important;
+}
+
 /* Custom styles for Leaflet map to fit perfectly with the dark theme */
 .leaflet-container {
   background: #0f172a !important;
