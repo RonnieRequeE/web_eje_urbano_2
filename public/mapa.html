@@ -11,7 +11,9 @@
       padding: 0;
       width: 100%;
       height: 100%;
+      min-height: 100%;
       background: #0f172a;
+      overflow: hidden;
     }
     /* Marcador clásico de origen / escena */
     .custom-marker-wrapper {
@@ -94,6 +96,17 @@
       maxZoom: 19
     }).addTo(map);
 
+    // ResizeObserver para que Leaflet siempre conozca el centro exacto del contenedor
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function() {
+        map.invalidateSize({ pan: false });
+      });
+      ro.observe(document.getElementById('map'));
+    }
+    window.addEventListener('resize', function() {
+      map.invalidateSize({ pan: false });
+    });
+
     var markersMap = {}; // id_alerta -> L.marker (Punto de origen)
     var walkingMarkersMap = {}; // id_alerta -> L.marker (Muñequito en vivo)
     var polylineMap = {}; // id_alerta -> L.polyline (Línea de rastreo)
@@ -143,7 +156,7 @@
           });
 
           var marker = L.marker([alerta.latitud, alerta.longitud], { icon: iconEscena })
-            .bindPopup(popupEscena)
+            .bindPopup(popupEscena, { autoPan: false })
             .addTo(map);
 
           marker.on('click', function() {
@@ -183,7 +196,7 @@
             });
 
             var walkingMarker = L.marker([latActual, lngActual], { icon: walkingIcon })
-              .bindPopup(popupMuñeco)
+              .bindPopup(popupMuñeco, { autoPan: false })
               .addTo(map);
 
             walkingMarker.on('click', function() {
@@ -251,21 +264,97 @@
         }
       } else if (event.data.type === 'UPDATE_ALERTS') {
         renderAlerts(event.data.alerts);
+      } else if (event.data.type === 'UPDATE_COORDS') {
+        var id = event.data.id;
+        var lat = Number(event.data.lat);
+        var lng = Number(event.data.lng);
+        if (id && lat && lng) {
+          if (walkingMarkersMap[id]) {
+            walkingMarkersMap[id].setLatLng([lat, lng]);
+            if (markersMap[id]) {
+              var posOrigen = markersMap[id].getLatLng();
+              var pathPoints = [posOrigen, [lat, lng]];
+              if (polylineMap[id]) {
+                polylineMap[id].setLatLngs(pathPoints);
+              } else {
+                polylineMap[id] = L.polyline(pathPoints, {
+                  color: '#f97316',
+                  weight: 3,
+                  opacity: 0.8,
+                  dashArray: '6, 8'
+                }).addTo(map);
+              }
+            }
+          } else {
+            var walkingIcon = L.divIcon({
+              html: walkingIconHtml,
+              className: '',
+              iconSize: [38, 38],
+              iconAnchor: [19, 19]
+            });
+            var wm = L.marker([lat, lng], { icon: walkingIcon }).addTo(map);
+            wm.on('click', function() {
+              window.parent.postMessage({ type: 'SELECT_ALERTA', id: id }, '*');
+            });
+            walkingMarkersMap[id] = wm;
+            if (markersMap[id]) {
+              polylineMap[id] = L.polyline([markersMap[id].getLatLng(), [lat, lng]], {
+                color: '#f97316',
+                weight: 3,
+                opacity: 0.8,
+                dashArray: '6, 8'
+              }).addTo(map);
+            }
+          }
+        }
       } else if (event.data.type === 'FOCUS_MARKER') {
         var id = event.data.id;
-        var lat = event.data.lat;
-        var lng = event.data.lng;
+        var lat = Number(event.data.lat);
+        var lng = Number(event.data.lng);
 
-        if (lat && lng) {
-          map.setView([lat, lng], 16, { animate: true, duration: 0.8 });
+        // 1. Recalcular dimensiones reales del contenedor del mapa sin paneo erroneo
+        map.invalidateSize({ pan: false, reset: true });
+
+        // 2. Determinar el marcador que se debe enfocar
+        var targetMarker = walkingMarkersMap[id] || markersMap[id];
+        var targetLatLng = targetMarker ? targetMarker.getLatLng() : (lat && lng ? L.latLng(lat, lng) : null);
+
+        if (!targetLatLng) return;
+
+        // 3. Cerrar cualquier popup previo para que no interfiera
+        map.closePopup();
+
+        // 4. Si hay dos marcadores (escena original y victima en movimiento) distanciados:
+        if (markersMap[id] && walkingMarkersMap[id]) {
+          var posOrigen = markersMap[id].getLatLng();
+          var posActual = walkingMarkersMap[id].getLatLng();
+          var distancia = posOrigen.distanceTo(posActual); // distancia en metros
+
+          if (distancia > 50) {
+            var bounds = L.latLngBounds([posOrigen, posActual]);
+            map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
+            setTimeout(function() {
+              if (walkingMarkersMap[id]) {
+                walkingMarkersMap[id].openPopup();
+              }
+            }, 250);
+            return;
+          }
         }
 
-        // Si existe el muñequito, abrir popup del muñequito; si no, el de la escena
-        if (walkingMarkersMap[id]) {
-          walkingMarkersMap[id].openPopup();
-        } else if (markersMap[id]) {
-          markersMap[id].openPopup();
-        }
+        // 5. Centrado matematico exacto en la coordenada objetivo
+        map.setView(targetLatLng, 16, { animate: false });
+
+        // 6. Abrir el popup exactamente sobre el marcador centrado
+        setTimeout(function() {
+          if (targetMarker) {
+            targetMarker.openPopup();
+          }
+        }, 120);
+      } else if (event.data.type === 'INVALIDATE_SIZE') {
+        setTimeout(function() {
+          map.invalidateSize();
+        }, 60);
       }
     });
 

@@ -122,6 +122,11 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [manageAlerta, setManageAlerta] = useState(null); // Alerta seleccionada para gestionar su estado
   const mapIframeRef = useRef(null); // Referencia al iframe estático de mapa.html
+  const alertasRef = useRef(alertas);
+  const knownActiveAlertIds = useRef(new Set());
+  useEffect(() => {
+    alertasRef.current = alertas;
+  }, [alertas]);
 
   // Check auth status
   useEffect(() => {
@@ -194,9 +199,14 @@ export default function App() {
     const alertsSubscription = supabase
       .channel('realtime_alerts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, async (payload) => {
-        // Ejecutar primero la lógica instantánea SOLO cuando la alerta es NUEVA (INSERT)
-        if (payload.eventType === 'INSERT' && payload.new && payload.new.estado === 'activa') {
-          // 1. Sonar pitido de forma inmediata
+        const isActiva = payload.new && payload.new.estado === 'activa';
+        const isKnownActive = payload.new && knownActiveAlertIds.current.has(payload.new.id);
+
+        if (payload.eventType === 'INSERT' && isActiva) {
+          // --- CASO 1: Alerta nueva creada ---
+          knownActiveAlertIds.current.add(payload.new.id);
+
+          // 1. Sonar pitido de emergencia
           try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') {
@@ -206,28 +216,144 @@ export default function App() {
             const gainNode = audioCtx.createGain();
             oscillator.type = 'sine';
             oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.5);
+            oscillator.stop(audioCtx.currentTime + 0.6);
           } catch (e) {
             console.log("Audio feedback error: ", e);
           }
 
-          // 2. Enfocar el mapa y abrir popup de forma inmediata
-          if (payload.new.latitud && payload.new.longitud) {
+          // 2. Conmutar a la pestaña de alertas y mover la vista al mapa
+          setDashboardTab('alertas');
+          setTimeout(() => {
+            const mapEl = document.getElementById('mapa-live-container');
+            if (mapEl) {
+              mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 60);
+
+          // 3. Descargar la nueva lista completa y actualizar estadísticas
+          await fetchAlertas();
+          fetchStats();
+
+          // 4. Enfocar inmediatamente el nuevo marcador en el mapa
+          const targetLat = payload.new.latitud_actual != null ? Number(payload.new.latitud_actual) : Number(payload.new.latitud);
+          const targetLng = payload.new.longitud_actual != null ? Number(payload.new.longitud_actual) : Number(payload.new.longitud);
+
+          if (targetLat && targetLng) {
             setSelectedAlerta({
-              latitud: payload.new.latitud,
-              longitud: payload.new.longitud,
+              latitud: targetLat,
+              longitud: targetLng,
               id: payload.new.id
             });
+
+            setTimeout(() => {
+              if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+                mapIframeRef.current.contentWindow.postMessage({
+                  type: 'FOCUS_MARKER',
+                  id: payload.new.id,
+                  lat: targetLat,
+                  lng: targetLng
+                }, '*');
+              }
+            }, 250);
           }
+        } else if (payload.eventType === 'UPDATE') {
+          if (isActiva && !isKnownActive) {
+            // --- CASO 2: Alerta reactivada o activada desde otro estado ---
+            knownActiveAlertIds.current.add(payload.new.id);
+
+            // 1. Sonar pitido de emergencia
+            try {
+              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+              }
+              const oscillator = audioCtx.createOscillator();
+              const gainNode = audioCtx.createGain();
+              oscillator.type = 'sine';
+              oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+              gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+              oscillator.connect(gainNode);
+              gainNode.connect(audioCtx.destination);
+              oscillator.start();
+              oscillator.stop(audioCtx.currentTime + 0.6);
+            } catch (e) {
+              console.log("Audio feedback error: ", e);
+            }
+
+            // 2. Conmutar a la pestaña de alertas y mover la vista al mapa
+            setDashboardTab('alertas');
+            setTimeout(() => {
+              const mapEl = document.getElementById('mapa-live-container');
+              if (mapEl) {
+                mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }, 60);
+
+            // 3. Descargar la nueva lista completa y actualizar estadísticas
+            await fetchAlertas();
+            fetchStats();
+
+            // 4. Enfocar inmediatamente en el mapa
+            const targetLat = payload.new.latitud_actual != null ? Number(payload.new.latitud_actual) : Number(payload.new.latitud);
+            const targetLng = payload.new.longitud_actual != null ? Number(payload.new.longitud_actual) : Number(payload.new.longitud);
+
+            if (targetLat && targetLng) {
+              setSelectedAlerta({
+                latitud: targetLat,
+                longitud: targetLng,
+                id: payload.new.id
+              });
+
+              setTimeout(() => {
+                if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+                  mapIframeRef.current.contentWindow.postMessage({
+                    type: 'FOCUS_MARKER',
+                    id: payload.new.id,
+                    lat: targetLat,
+                    lng: targetLng
+                  }, '*');
+                }
+              }, 250);
+            }
+          } else if (isActiva && isKnownActive) {
+            // --- CASO 3: Actualización periódica de GPS en tiempo real de una alerta ya activa ---
+            // NO sonar pitido, NO re-renderizar tabla ni llamar fetchAlertas()
+            const targetLat = payload.new.latitud_actual != null ? Number(payload.new.latitud_actual) : Number(payload.new.latitud);
+            const targetLng = payload.new.longitud_actual != null ? Number(payload.new.longitud_actual) : Number(payload.new.longitud);
+
+            // Actualizar discretamente en memoria sin causar re-renderizado ni parpadeos
+            alertasRef.current = alertasRef.current.map(a => {
+              if (a.id === payload.new.id) {
+                return { ...a, ...payload.new };
+              }
+              return a;
+            });
+
+            // Notificar al mapa Leaflet para mover el muñequito en vivo
+            if (mapIframeRef.current && mapIframeRef.current.contentWindow && targetLat && targetLng) {
+              mapIframeRef.current.contentWindow.postMessage({
+                type: 'UPDATE_COORDS',
+                id: payload.new.id,
+                lat: targetLat,
+                lng: targetLng
+              }, '*');
+            }
+          } else if (!isActiva) {
+            // --- CASO 4: Alerta atendida / finalizada / falsa alarma ---
+            const targetId = payload.new?.id || payload.old?.id;
+            if (targetId) knownActiveAlertIds.current.delete(targetId);
+            await fetchAlertas();
+            fetchStats();
+          }
+        } else if (payload.eventType === 'DELETE') {
+          if (payload.old?.id) knownActiveAlertIds.current.delete(payload.old.id);
+          await fetchAlertas();
+          fetchStats();
         }
-        
-        // 3. Descargar la nueva lista en segundo plano para actualizar la tabla
-        await fetchAlertas();
-        fetchStats();
       })
       .subscribe();
 
@@ -240,11 +366,20 @@ export default function App() {
       })
       .subscribe();
 
-    // Escuchar clicks de alertas dentro del iframe del mapa
+    return () => {
+      supabase.removeChannel(alertsSubscription);
+      supabase.removeChannel(usersSubscription);
+    };
+  }, [user, currentPage]);
+
+  // Escuchar eventos y clicks provenientes del iframe del mapa Leaflet
+  useEffect(() => {
     const handleMapMessage = (event) => {
-      if (event.data && event.data.type === 'SELECT_ALERTA') {
+      if (!event.data) return;
+
+      if (event.data.type === 'SELECT_ALERTA') {
         const alertaId = event.data.id;
-        const alertaEncontrada = alertas.find(a => a.id === alertaId);
+        const alertaEncontrada = alertasRef.current.find(a => a.id === alertaId);
         if (alertaEncontrada) {
           setSelectedAlerta({
             latitud: alertaEncontrada.latitud,
@@ -256,15 +391,11 @@ export default function App() {
           setTimeout(() => {
             const element = document.getElementById(`alerta-row-${alertaId}`);
             if (element) {
-              // Buscar el contenedor scrollable de la tabla (el div que tiene max-h-[450px])
               const scrollContainer = element.closest('.overflow-y-auto');
               if (scrollContainer) {
-                // Calcular la posición relativa del elemento dentro del contenedor
                 const elementTop = element.offsetTop;
                 const containerHeight = scrollContainer.clientHeight;
                 const elementHeight = element.clientHeight;
-                
-                // Centrar la fila de la alerta en el medio del contenedor scrollable de la tabla
                 scrollContainer.scrollTo({
                   top: elementTop - (containerHeight / 2) + (elementHeight / 2),
                   behavior: 'smooth'
@@ -273,16 +404,40 @@ export default function App() {
             }
           }, 100);
         }
+      } else if (event.data.type === 'MAP_READY') {
+        // Enviar tema y alertas apenas Leaflet esté listo en el iframe
+        if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+          try {
+            mapIframeRef.current.contentWindow.postMessage({
+              type: 'SET_THEME',
+              theme: mapTheme
+            }, '*');
+            const activas = alertasRef.current.filter(a => a.estado === 'activa' && a.latitud && a.longitud);
+            mapIframeRef.current.contentWindow.postMessage({
+              type: 'UPDATE_ALERTS',
+              alerts: activas
+            }, '*');
+          } catch (e) {
+            console.error("Error al sincronizar con mapa listo:", e);
+          }
+        }
       }
     };
-    window.addEventListener('message', handleMapMessage);
 
-    return () => {
-      supabase.removeChannel(alertsSubscription);
-      supabase.removeChannel(usersSubscription);
-      window.removeEventListener('message', handleMapMessage);
-    };
-  }, [user, currentPage, alertas]);
+    window.addEventListener('message', handleMapMessage);
+    return () => window.removeEventListener('message', handleMapMessage);
+  }, [mapTheme]);
+
+  // Redimensionar Leaflet sin parpadeo al volver a la pestaña de alertas
+  useEffect(() => {
+    if (dashboardTab === 'alertas' && mapIframeRef.current && mapIframeRef.current.contentWindow) {
+      try {
+        mapIframeRef.current.contentWindow.postMessage({ type: 'INVALIDATE_SIZE' }, '*');
+      } catch (e) {
+        console.error("Error al invalidar tamaño de mapa:", e);
+      }
+    }
+  }, [dashboardTab]);
 
   // Sincronizar alertas activas con el mapa estático de forma transparente
   useEffect(() => {
@@ -369,7 +524,27 @@ export default function App() {
     }
 
     const { data } = await query.order('created_at', { ascending: false });
-    if (data) setAlertas(data);
+    if (data) {
+      setAlertas(data);
+      const activeIds = new Set();
+      const activas = data.filter(a => {
+        if (a.estado === 'activa') {
+          activeIds.add(a.id);
+          return true;
+        }
+        return false;
+      });
+      knownActiveAlertIds.current = activeIds;
+
+      if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+        const activasConCoords = activas.filter(a => a.latitud && a.longitud);
+        mapIframeRef.current.contentWindow.postMessage({
+          type: 'UPDATE_ALERTS',
+          alerts: activasConCoords
+        }, '*');
+      }
+    }
+    return data;
   };
 
   const fetchUsuarios = async () => {
@@ -1824,12 +1999,11 @@ export default function App() {
               </div>
             </div>
 
-            {/* Tab content 1: Alertas */}
-            {dashboardTab === 'alertas' && (
-              <div className="space-y-6">
+            {/* Tab content 1: Alertas (Persistente con hidden para evitar recargas y parpadeos del mapa) */}
+            <div className={`space-y-6 ${dashboardTab === 'alertas' ? 'block' : 'hidden'}`}>
                 
                 {/* Active Alerts Live Map */}
-                <div className="rounded-2xl border border-white/5 overflow-hidden h-[550px] relative glow-cyan flex flex-col">
+                <div id="mapa-live-container" className="rounded-2xl border border-white/5 overflow-hidden h-[550px] relative glow-cyan block">
                   {/* Theme Selector Overlay */}
                   <div className="absolute top-3 right-3 z-20 bg-slate-900/90 border border-white/10 rounded-xl p-1 flex gap-1 shadow-lg backdrop-blur-md">
                     <button 
@@ -1849,7 +2023,8 @@ export default function App() {
                   <iframe
                     ref={mapIframeRef}
                     key="static-leaflet-map"
-                    className="w-full h-full border-0 flex-grow"
+                    className="w-full border-0 block"
+                    style={{ width: '100%', height: '550px', minHeight: '550px' }}
                     title="Active Alerts Map"
                     src="mapa.html"
                     onLoad={() => {
@@ -1905,7 +2080,28 @@ export default function App() {
                               id={`alerta-row-${alerta.id}`}
                               onClick={() => {
                                 if (alerta.estado === 'activa' && alerta.latitud && alerta.longitud) {
-                                  setSelectedAlerta({ latitud: alerta.latitud, longitud: alerta.longitud, id: alerta.id });
+                                  const latest = alertasRef.current.find(a => a.id === alerta.id) || alerta;
+                                  const targetLat = latest.latitud_actual != null ? Number(latest.latitud_actual) : Number(latest.latitud);
+                                  const targetLng = latest.longitud_actual != null ? Number(latest.longitud_actual) : Number(latest.longitud);
+                                  setSelectedAlerta({ latitud: targetLat, longitud: targetLng, id: alerta.id });
+                                  
+                                  // Enviar de inmediato al iframe para centrar al instante sin desvios
+                                  if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+                                    mapIframeRef.current.contentWindow.postMessage({
+                                      type: 'FOCUS_MARKER',
+                                      id: alerta.id,
+                                      lat: targetLat,
+                                      lng: targetLng
+                                    }, '*');
+                                  }
+
+                                  const mapEl = document.getElementById('mapa-live-container');
+                                  if (mapEl) {
+                                    const rect = mapEl.getBoundingClientRect();
+                                    if (rect.top < 0 || rect.bottom > window.innerHeight) {
+                                      mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    }
+                                  }
                                 }
                               }}
                               className={`transition-colors cursor-pointer ${selectedAlerta && selectedAlerta.id === alerta.id ? 'bg-sky-500/10 border-l-4 border-l-[#00E5FF] hover:bg-sky-500/20' : alerta.estado === 'activa' ? 'hover:bg-red-500/5 bg-red-500/2' : 'hover:bg-slate-900/40'}`}
@@ -1918,7 +2114,7 @@ export default function App() {
                                 </span>
                               </td>
                               <td className="px-6 py-4">
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${alerta.estado === 'activa' ? 'bg-red-600 text-white animate-pulse' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${alerta.estado === 'activa' ? 'bg-red-600 text-white shadow-sm shadow-red-500/30' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
                                   {alerta.estado}
                                 </span>
                               </td>
@@ -1989,8 +2185,7 @@ export default function App() {
                     </table>
                   </div>
                 </div>
-              </div>
-            )}
+            </div>
 
             {/* Tab content 2: Usuarios */}
             {dashboardTab === 'usuarios' && (
