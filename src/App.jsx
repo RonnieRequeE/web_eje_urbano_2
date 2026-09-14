@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import { 
   Shield, 
@@ -65,6 +65,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [manageAlerta, setManageAlerta] = useState(null); // Alerta seleccionada para gestionar su estado
+  const mapIframeRef = useRef(null); // Referencia al iframe estático de mapa.html
 
   // Check auth status
   useEffect(() => {
@@ -132,8 +133,8 @@ export default function App() {
     const alertsSubscription = supabase
       .channel('realtime_alerts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, async (payload) => {
-        // Ejecutar primero la lógica instantánea de la alerta entrante
-        if (payload.new && payload.new.estado === 'activa') {
+        // Ejecutar primero la lógica instantánea SOLO cuando la alerta es NUEVA (INSERT)
+        if (payload.eventType === 'INSERT' && payload.new && payload.new.estado === 'activa') {
           // 1. Sonar pitido de forma inmediata
           try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -221,6 +222,51 @@ export default function App() {
       window.removeEventListener('message', handleMapMessage);
     };
   }, [user, currentPage, alertas]);
+
+  // Sincronizar alertas activas con el mapa estático de forma transparente
+  useEffect(() => {
+    if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+      try {
+        const activas = alertas.filter(a => a.estado === 'activa' && a.latitud && a.longitud);
+        mapIframeRef.current.contentWindow.postMessage({
+          type: 'UPDATE_ALERTS',
+          alerts: activas
+        }, '*');
+      } catch (e) {
+        console.error("Error al enviar alertas al mapa:", e);
+      }
+    }
+  }, [alertas]);
+
+  // Enfocar marcador y abrir popup en el mapa estático cuando cambie selectedAlerta
+  useEffect(() => {
+    if (selectedAlerta && mapIframeRef.current && mapIframeRef.current.contentWindow) {
+      try {
+        mapIframeRef.current.contentWindow.postMessage({
+          type: 'FOCUS_MARKER',
+          id: selectedAlerta.id,
+          lat: selectedAlerta.latitud,
+          lng: selectedAlerta.longitud
+        }, '*');
+      } catch (e) {
+        console.error("Error al enfocar marcador en el mapa:", e);
+      }
+    }
+  }, [selectedAlerta]);
+
+  // Sincronizar tema con el mapa estático
+  useEffect(() => {
+    if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+      try {
+        mapIframeRef.current.contentWindow.postMessage({
+          type: 'SET_THEME',
+          theme: mapTheme
+        }, '*');
+      } catch (e) {
+        console.error("Error al sincronizar tema con el mapa:", e);
+      }
+    }
+  }, [mapTheme]);
 
   const fetchStats = async () => {
     try {
@@ -1084,119 +1130,24 @@ export default function App() {
                   </div>
 
                   <iframe
-                    key={`map-${mapTheme}-${alertas.length}-${selectedAlerta ? selectedAlerta.id : 'none'}`}
+                    ref={mapIframeRef}
+                    key="static-leaflet-map"
                     className="w-full h-full border-0 flex-grow"
                     title="Active Alerts Map"
-                    srcDoc={`
-                      <!DOCTYPE html>
-                      <html>
-                      <head>
-                        <link rel="icon" type="image/svg+xml" href="images/favicon.svg" />
-                        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-                        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                        <style>
-                          body, html, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: ${mapTheme === 'dark' ? '#0f172a' : '#f8fafc'}; }
-                          .custom-marker-wrapper {
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            width: 24px !important;
-                            height: 24px !important;
-                          }
-                          .custom-marker {
-                            width: 18px !important;
-                            height: 18px !important;
-                            border-radius: 50%;
-                            background: #ef4444;
-                            border: 3px solid #ffffff;
-                            box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
-                            box-sizing: border-box;
-                            animation: pulse 1.5s infinite;
-                          }
-                          @keyframes pulse {
-                            0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-                            70% { transform: scale(1.1); box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-                            100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-                          }
-                          .popup-box {
-                            font-family: sans-serif;
-                            color: ${mapTheme === 'dark' ? '#f8fafc' : '#0f172a'};
-                          }
-                          .popup-box h3 { margin: 0 0 5px 0; font-size: 14px; color: #ef4444; }
-                          .popup-box p { margin: 0; font-size: 12px; color: ${mapTheme === 'dark' ? '#cbd5e1' : '#334155'}; }
-                        </style>
-                      </head>
-                      <body>
-                        <div id="map"></div>
-                        <script>
-                          var defaultCenter = [-17.3895, -66.1568];
-                          var defaultZoom = 6;
-                          
-                          var focusAlerta = ${selectedAlerta ? JSON.stringify(selectedAlerta) : 'null'};
-                          if (focusAlerta && focusAlerta.latitud && focusAlerta.longitud) {
-                            defaultCenter = [focusAlerta.latitud, focusAlerta.longitud];
-                            defaultZoom = 15;
-                          }
-
-                          var map = L.map('map').setView(defaultCenter, defaultZoom);
-                          
-                          // Load layer depending on selected theme
-                          var tileUrl = '${mapTheme === 'dark' ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'}';
-                          L.tileLayer(tileUrl, {
-                            attribution: '&copy; OpenStreetMap'
-                          }).addTo(map);
-
-                          var alerts = ${JSON.stringify(alertas.filter(a => a.estado === 'activa' && a.latitud && a.longitud))};
-                          var markersGroup = [];
-
-                          alerts.forEach(function(alerta) {
-                            var icon = L.divIcon({
-                              html: '<div class="custom-marker"></div>',
-                              className: 'custom-marker-wrapper',
-                              iconSize: [24, 24],
-                              iconAnchor: [12, 12]
-                            });
-
-                            var fecha = new Date(alerta.created_at);
-                            var horaFormateada = fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                            var fechaFormateada = fecha.toLocaleDateString('es-ES');
-
-                            var popupContent = '<div class="popup-box">' +
-                              '<h3>🚨 ' + alerta.tipo + '</h3>' +
-                              '<p><strong>Vecino:</strong> ' + (alerta.emisor?.nombre || 'Botón Físico / Anónimo') + '</p>' +
-                              '<p><strong>Origen:</strong> ' + alerta.origen + '</p>' +
-                              '<p><strong>Comunidad:</strong> ' + (alerta.comunidad?.nombre || 'General') + '</p>' +
-                              '<p><strong>Hora:</strong> ' + fechaFormateada + ' ' + horaFormateada + '</p>' +
-                              '</div>';
-
-                            var marker = L.marker([alerta.latitud, alerta.longitud], { icon: icon })
-                              .bindPopup(popupContent)
-                              .addTo(map);
-
-                            // Notificar a la web padre cuando el usuario hace clic en el marcador
-                            marker.on('click', function() {
-                              window.parent.postMessage({
-                                type: 'SELECT_ALERTA',
-                                id: alerta.id
-                              }, '*');
-                            });
-
-                            if (focusAlerta && focusAlerta.id === alerta.id) {
-                              marker.openPopup();
-                            }
-
-                            markersGroup.push([alerta.latitud, alerta.longitud]);
-                          });
-
-                          // Only auto-fit bounds if we are not explicitly focusing on an alert
-                          if (!focusAlerta && markersGroup.length > 0) {
-                            var bounds = L.latLngBounds(markersGroup);
-                            map.fitBounds(bounds, { padding: [50, 50] });
-                          }
-                        </script>
-                      </body>
-                      </html>
-                    `}
+                    src="mapa.html"
+                    onLoad={() => {
+                      if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
+                        mapIframeRef.current.contentWindow.postMessage({
+                          type: 'SET_THEME',
+                          theme: mapTheme
+                        }, '*');
+                        const activas = alertas.filter(a => a.estado === 'activa' && a.latitud && a.longitud);
+                        mapIframeRef.current.contentWindow.postMessage({
+                          type: 'UPDATE_ALERTS',
+                          alerts: activas
+                        }, '*');
+                      }
+                    }}
                   />
                   {stats.activeAlerts === 0 && (
                     <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-[1000]">
