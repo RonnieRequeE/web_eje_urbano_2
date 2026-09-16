@@ -51,6 +51,19 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [loadingUser, setLoadingUser] = useState(true);
 
+  // Estados para recuperación de contraseña (OTP)
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1: Pedir Correo, 2: Código OTP y Nueva Contraseña
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetOtpCode, setResetOtpCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetNewPassword, setShowResetNewPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetSuccess, setResetSuccess] = useState('');
+
   // Dashboard Stats
   const [stats, setStats] = useState({
     activeAlerts: 0,
@@ -671,6 +684,86 @@ export default function App() {
     setEmail('');
     setPassword('');
     setCurrentPage('home');
+  };
+
+  // Manejo de recuperación de contraseña vía código OTP de 6 dígitos
+  const handleSendResetEmail = async (e) => {
+    e?.preventDefault();
+    const mail = resetEmail.trim();
+    if (!mail) {
+      setResetError('Por favor, ingresa tu correo electrónico.');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(mail)) {
+      setResetError('Formato de correo electrónico inválido.');
+      return;
+    }
+    setResetError('');
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(mail);
+      if (error) throw error;
+      setResetStep(2);
+      setResetError('');
+    } catch (err) {
+      setResetError(err.message || 'Error al enviar el código de recuperación.');
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
+  const handleVerifyOtpAndResetPassword = async (e) => {
+    e?.preventDefault();
+    const code = resetOtpCode.trim();
+    if (code.length < 6) {
+      setResetError('El código debe tener al menos 6 dígitos.');
+      return;
+    }
+    if (resetNewPassword.length < 6) {
+      setResetError('La nueva contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetError('Las contraseñas no coinciden.');
+      return;
+    }
+    setResetError('');
+    setResetLoading(true);
+    try {
+      // 1. Validar el OTP de tipo recovery
+      const { error: otpError } = await supabase.auth.verifyOtp({
+        email: resetEmail.trim(),
+        token: code,
+        type: 'recovery'
+      });
+      if (otpError) throw otpError;
+
+      // 2. Actualizar contraseña del usuario
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: resetNewPassword
+      });
+      if (updateError) throw updateError;
+
+      // 3. Cerrar sesión de recuperación para requerir login normal
+      await supabase.auth.signOut();
+
+      setResetSuccess('¡Contraseña restablecida con éxito! Ya puedes iniciar sesión con tu nueva contraseña.');
+      setEmail(resetEmail.trim());
+      setPassword('');
+    } catch (err) {
+      let msg = err.message || 'Error al restablecer la contraseña.';
+      if (msg.includes('Token has expired') || msg.includes('expired')) {
+        msg = 'El código ha expirado. Por favor, solicita uno nuevo.';
+      } else if (msg.includes('invalid') || msg.includes('Token is invalid')) {
+        msg = 'Código de seguridad incorrecto. Revisa el correo recibido.';
+      } else if (msg.includes('same password')) {
+        msg = 'La nueva contraseña debe ser diferente a la anterior.';
+      }
+      setResetError(msg);
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   // Actualizar estado específico de la alerta
@@ -1869,6 +1962,26 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                <div className="flex justify-end -mt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetModal(true);
+                      setResetEmail(email.trim());
+                      setResetOtpCode('');
+                      setResetNewPassword('');
+                      setResetConfirmPassword('');
+                      setResetError('');
+                      setResetSuccess('');
+                      setResetStep(1);
+                    }}
+                    className="text-xs text-[#00E5FF] hover:underline font-medium cursor-pointer transition-colors"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
+
                 <button 
                   type="submit" 
                   disabled={formLoading}
@@ -1879,6 +1992,201 @@ export default function App() {
               </form>
             </div>
           </section>
+        )}
+
+        {/* MODAL RECUPERACIÓN DE CONTRASEÑA (CÓDIGO OTP 6 DÍGITOS) */}
+        {showResetModal && (
+          <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-[9999] animate-fade-in">
+            <div className="bg-[#0f172a] border border-[#00E5FF]/30 max-w-md w-full rounded-3xl p-6 sm:p-8 shadow-2xl relative text-left">
+              <button 
+                onClick={() => {
+                  if (!resetLoading) {
+                    setShowResetModal(false);
+                  }
+                }}
+                disabled={resetLoading}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-6">
+                <span className={`w-12 h-12 rounded-xl flex items-center justify-center ${resetSuccess ? 'bg-emerald-950/60 text-emerald-400' : 'bg-cyan-950/60 text-[#00E5FF]'}`}>
+                  {resetSuccess ? <CheckCircle className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
+                </span>
+                <div>
+                  <h3 className="text-xl font-bold text-white">
+                    {resetSuccess ? '¡Clave Actualizada!' : (resetStep === 1 ? 'Recuperar Contraseña' : 'Código de Seguridad')}
+                  </h3>
+                  <p className="text-xs text-gray-400 font-medium">Eje Urbano Seguridad</p>
+                </div>
+              </div>
+
+              {resetSuccess ? (
+                <div className="space-y-6">
+                  <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-400 text-sm leading-relaxed flex items-start gap-3">
+                    <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-emerald-400" />
+                    <span>{resetSuccess}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowResetModal(false)}
+                    className="w-full py-3.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 cursor-pointer"
+                  >
+                    Entendido / Iniciar Sesión
+                  </button>
+                </div>
+              ) : resetStep === 1 ? (
+                <form onSubmit={handleSendResetEmail} className="space-y-5">
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Ingresa el correo electrónico asociado a tu cuenta de administrador. Te enviaremos un código de seguridad de 6 dígitos para restablecer tu clave.
+                  </p>
+
+                  {resetError && (
+                    <div className="p-3.5 rounded-xl bg-red-950/50 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>{resetError}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Correo Electrónico</label>
+                    <input 
+                      type="email" 
+                      required 
+                      value={resetEmail}
+                      onChange={(e) => {
+                        setResetEmail(e.target.value);
+                        setResetError('');
+                      }}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm" 
+                      placeholder="correo@ejemplo.com"
+                      disabled={resetLoading}
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowResetModal(false)}
+                      disabled={resetLoading}
+                      className="w-1/2 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold text-sm transition-all cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={resetLoading}
+                      className="w-1/2 py-3.5 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+                    >
+                      {resetLoading ? 'Enviando...' : 'Enviar Código'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtpAndResetPassword} className="space-y-4">
+                  <div className="p-3 rounded-xl bg-slate-900/80 border border-gray-800 text-xs text-gray-300">
+                    Código enviado a: <strong className="text-[#00E5FF]">{resetEmail}</strong>
+                  </div>
+
+                  {resetError && (
+                    <div className="p-3.5 rounded-xl bg-red-950/50 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                      <span>{resetError}</span>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Código de 6 dígitos</label>
+                    <input 
+                      type="text" 
+                      required 
+                      maxLength={8}
+                      value={resetOtpCode}
+                      onChange={(e) => {
+                        setResetOtpCode(e.target.value.trim());
+                        setResetError('');
+                      }}
+                      className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm tracking-widest font-mono text-center text-lg" 
+                      placeholder="482910"
+                      disabled={resetLoading}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Nueva Contraseña</label>
+                    <div className="relative">
+                      <input 
+                        type={showResetNewPassword ? "text" : "password"} 
+                        required 
+                        value={resetNewPassword}
+                        onChange={(e) => {
+                          setResetNewPassword(e.target.value);
+                          setResetError('');
+                        }}
+                        className="w-full pl-4 pr-11 py-2.5 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm" 
+                        placeholder="••••••••"
+                        disabled={resetLoading}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetNewPassword(!showResetNewPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        {showResetNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Confirmar Contraseña</label>
+                    <div className="relative">
+                      <input 
+                        type={showResetConfirmPassword ? "text" : "password"} 
+                        required 
+                        value={resetConfirmPassword}
+                        onChange={(e) => {
+                          setResetConfirmPassword(e.target.value);
+                          setResetError('');
+                        }}
+                        className="w-full pl-4 pr-11 py-2.5 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm" 
+                        placeholder="••••••••"
+                        disabled={resetLoading}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                      >
+                        {showResetConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetStep(1);
+                        setResetError('');
+                      }}
+                      disabled={resetLoading}
+                      className="w-1/3 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 font-semibold text-xs transition-all cursor-pointer"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={resetLoading}
+                      className="w-2/3 py-3 rounded-xl bg-gradient-to-tr from-[#1E88E5] to-[#00E5FF] hover:from-[#1565C0] hover:to-[#00B0FF] text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+                    >
+                      {resetLoading ? 'Cambiando...' : 'Cambiar Contraseña'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
         )}
 
         {/* PAGE: DASHBOARD */}
