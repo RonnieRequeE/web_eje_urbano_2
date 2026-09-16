@@ -686,7 +686,7 @@ export default function App() {
     setCurrentPage('home');
   };
 
-  // Manejo de recuperación de contraseña vía código OTP de 6 dígitos
+  // Manejo de recuperación de contraseña vía código OTP de 8 dígitos
   const handleSendResetEmail = async (e) => {
     e?.preventDefault();
     const mail = resetEmail.trim();
@@ -705,9 +705,8 @@ export default function App() {
       const { error } = await supabase.auth.resetPasswordForEmail(mail);
       if (error) throw error;
       setResetStep(2);
-      setResetError('');
     } catch (err) {
-      setResetError(err.message || 'Error al enviar el código de recuperación.');
+      setResetError(err.message || 'Error al enviar código de recuperación.');
     } finally {
       setResetLoading(false);
     }
@@ -716,12 +715,14 @@ export default function App() {
   const handleVerifyOtpAndResetPassword = async (e) => {
     e?.preventDefault();
     const code = resetOtpCode.trim();
-    if (code.length < 6) {
-      setResetError('El código debe tener al menos 6 dígitos.');
+    if (code.length < 8) {
+      setResetError('El código debe tener 8 dígitos.');
       return;
     }
-    if (resetNewPassword.length < 6) {
-      setResetError('La nueva contraseña debe tener al menos 6 caracteres.');
+    const hasUpperCase = /[A-Z]/.test(resetNewPassword);
+    const hasNumber = /[0-9]/.test(resetNewPassword);
+    if (resetNewPassword.length < 6 || !hasUpperCase || !hasNumber) {
+      setResetError('La contraseña debe tener al menos 6 caracteres, una mayúscula y un número.');
       return;
     }
     if (resetNewPassword !== resetConfirmPassword) {
@@ -2039,7 +2040,7 @@ export default function App() {
               ) : resetStep === 1 ? (
                 <form onSubmit={handleSendResetEmail} className="space-y-5">
                   <p className="text-xs text-gray-300 leading-relaxed">
-                    Ingresa el correo electrónico asociado a tu cuenta de administrador. Te enviaremos un código de seguridad de 6 dígitos para restablecer tu clave.
+                    Ingresa el correo electrónico asociado a tu cuenta de administrador. Te enviaremos un código de seguridad de 8 dígitos para restablecer tu clave.
                   </p>
 
                   {resetError && (
@@ -2086,7 +2087,8 @@ export default function App() {
               ) : (
                 <form onSubmit={handleVerifyOtpAndResetPassword} className="space-y-4">
                   <div className="p-3 rounded-xl bg-slate-900/80 border border-gray-800 text-xs text-gray-300">
-                    Código enviado a: <strong className="text-[#00E5FF]">{resetEmail}</strong>
+                    <div>Código de 8 dígitos enviado a: <strong className="text-[#00E5FF]">{resetEmail}</strong></div>
+                    <div className="text-[11px] text-gray-400 mt-1">La nueva contraseña debe tener al menos 6 caracteres, una mayúscula y un número.</div>
                   </div>
 
                   {resetError && (
@@ -2097,18 +2099,19 @@ export default function App() {
                   )}
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Código de 6 dígitos</label>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Código de 8 dígitos</label>
                     <input 
                       type="text" 
                       required 
                       maxLength={8}
                       value={resetOtpCode}
                       onChange={(e) => {
-                        setResetOtpCode(e.target.value.trim());
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                        setResetOtpCode(val);
                         setResetError('');
                       }}
                       className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-gray-800 focus:border-[#00E5FF] focus:outline-none text-white text-sm tracking-widest font-mono text-center text-lg" 
-                      placeholder="482910"
+                      placeholder="12345678"
                       disabled={resetLoading}
                     />
                   </div>
