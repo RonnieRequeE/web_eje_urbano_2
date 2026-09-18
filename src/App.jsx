@@ -145,77 +145,106 @@ export default function App() {
     alertasRef.current = alertas;
   }, [alertas]);
 
+  // Cargar perfil completo del usuario con comunidad asignada
+  const loadProfile = async (sessionUser) => {
+    if (!sessionUser) {
+      setUserProfile(null);
+      return null;
+    }
+    try {
+      const { data: profile, error } = await supabase
+        .from('usuarios')
+        .select('id, nombre, rol, id_comunidad, direccion, telefono, estado, created_at, comunidad:comunidades(nombre)')
+        .eq('id', sessionUser.id)
+        .single();
+      if (error || !profile) {
+        console.error("Error loading user profile:", error);
+        setUserProfile(null);
+        return null;
+      }
+      const profData = {
+        id: profile.id,
+        email: sessionUser.email,
+        nombre: profile.nombre,
+        rol: profile.rol,
+        id_comunidad: profile.id_comunidad,
+        nombre_comunidad: profile.comunidad?.nombre || '',
+        direccion: profile.direccion || '',
+        telefono: profile.telefono || '',
+        estado: profile.estado || 'activo',
+        created_at: profile.created_at || ''
+      };
+      setUserProfile(profData);
+      return profData;
+    } catch (err) {
+      console.error("Error loading user profile:", err);
+      setUserProfile(null);
+      return null;
+    }
+  };
+
   // Check auth status
   useEffect(() => {
-    const loadProfile = async (sessionUser) => {
-      if (!sessionUser) {
-        setUserProfile(null);
-        return;
-      }
-      try {
-        const { data: profile } = await supabase
-          .from('usuarios')
-          .select('id, nombre, rol, id_comunidad, direccion, telefono, estado, created_at, comunidad:comunidades(nombre)')
-          .eq('id', sessionUser.id)
-          .single();
-        if (profile) {
-          setUserProfile({
-            id: profile.id,
-            email: sessionUser.email,
-            nombre: profile.nombre,
-            rol: profile.rol,
-            id_comunidad: profile.id_comunidad,
-            nombre_comunidad: profile.comunidad?.nombre || '',
-            direccion: profile.direccion || '',
-            telefono: profile.telefono || '',
-            estado: profile.estado || 'activo',
-            created_at: profile.created_at || ''
-          });
-        }
-      } catch (err) {
-        console.error("Error loading user profile:", err);
-      }
-    };
+    let isMounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isMounted) return;
       if (session?.user) {
-        loadProfile(session.user);
-        setCurrentPage('dashboard');
+        const prof = await loadProfile(session.user);
+        if (!isMounted) return;
+        if (prof && ['admin', 'super_admin'].includes(prof.rol)) {
+          setUser(session.user);
+          setCurrentPage('dashboard');
+        } else {
+          await supabase.auth.signOut();
+          setUser(null);
+          setUserProfile(null);
+          setCurrentPage('home');
+        }
+      } else {
+        setUser(null);
+        setUserProfile(null);
       }
       setLoadingUser(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadProfile(session.user);
-        setCurrentPage('dashboard');
-      } else {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return;
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setUser(null);
         setUserProfile(null);
-        if (currentPage === 'dashboard') {
-          setCurrentPage('home');
-        }
+        setCurrentPage('home');
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Fetch Dashboard Stats & Realtime subscriptions
   useEffect(() => {
-    if (!user || currentPage !== 'dashboard') return;
+    if (!user || currentPage !== 'dashboard' || !userProfile) return;
 
-    fetchStats();
-    fetchAlertas();
-    fetchUsuarios();
-    fetchComunidades();
-    fetchDispositivos();
+    fetchStats(userProfile);
+    fetchAlertas(userProfile);
+    fetchUsuarios(userProfile);
+    fetchComunidades(userProfile);
+    fetchDispositivos(userProfile);
 
     // Subscribe to new Alerts in Realtime!
     const alertsSubscription = supabase
       .channel('realtime_alerts')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alertas' }, async (payload) => {
+        // Si es admin local, ignorar alertas de otras comunidades
+        if (userProfile?.rol === 'admin' && userProfile?.id_comunidad) {
+          const alertCom = payload.new?.id_comunidad || payload.old?.id_comunidad;
+          if (alertCom && alertCom !== userProfile.id_comunidad) {
+            return;
+          }
+        }
+
         const isActiva = payload.new && payload.new.estado === 'activa';
         const isKnownActive = payload.new && knownActiveAlertIds.current.has(payload.new.id);
 
@@ -252,8 +281,8 @@ export default function App() {
           }, 60);
 
           // 3. Descargar la nueva lista completa y actualizar estadísticas
-          await fetchAlertas();
-          fetchStats();
+          await fetchAlertas(userProfile);
+          fetchStats(userProfile);
 
           // 4. Enfocar inmediatamente el nuevo marcador en el mapa
           const targetLat = payload.new.latitud_actual != null ? Number(payload.new.latitud_actual) : Number(payload.new.latitud);
@@ -311,8 +340,8 @@ export default function App() {
             }, 60);
 
             // 3. Descargar la nueva lista completa y actualizar estadísticas
-            await fetchAlertas();
-            fetchStats();
+            await fetchAlertas(userProfile);
+            fetchStats(userProfile);
 
             // 4. Enfocar inmediatamente en el mapa
             const targetLat = payload.new.latitud_actual != null ? Number(payload.new.latitud_actual) : Number(payload.new.latitud);
@@ -364,13 +393,13 @@ export default function App() {
             // --- CASO 4: Alerta atendida / finalizada / falsa alarma ---
             const targetId = payload.new?.id || payload.old?.id;
             if (targetId) knownActiveAlertIds.current.delete(targetId);
-            await fetchAlertas();
-            fetchStats();
+            await fetchAlertas(userProfile);
+            fetchStats(userProfile);
           }
         } else if (payload.eventType === 'DELETE') {
           if (payload.old?.id) knownActiveAlertIds.current.delete(payload.old.id);
-          await fetchAlertas();
-          fetchStats();
+          await fetchAlertas(userProfile);
+          fetchStats(userProfile);
         }
       })
       .subscribe();
@@ -378,9 +407,15 @@ export default function App() {
     // Subscribe to user list changes
     const usersSubscription = supabase
       .channel('realtime_users')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, () => {
-        fetchUsuarios();
-        fetchStats();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, (payload) => {
+        if (userProfile?.rol === 'admin' && userProfile?.id_comunidad) {
+          const userCom = payload.new?.id_comunidad || payload.old?.id_comunidad;
+          if (userCom && userCom !== userProfile.id_comunidad) {
+            return;
+          }
+        }
+        fetchUsuarios(userProfile);
+        fetchStats(userProfile);
       })
       .subscribe();
 
@@ -388,7 +423,7 @@ export default function App() {
       supabase.removeChannel(alertsSubscription);
       supabase.removeChannel(usersSubscription);
     };
-  }, [user, currentPage]);
+  }, [user, currentPage, userProfile?.id, userProfile?.rol, userProfile?.id_comunidad]);
 
   // Escuchar eventos y clicks provenientes del iframe del mapa Leaflet
   useEffect(() => {
@@ -502,18 +537,18 @@ export default function App() {
     }
   }, [mapTheme]);
 
-  const fetchStats = async () => {
+  const fetchStats = async (profile = userProfile) => {
     try {
       let alertsQuery = supabase.from('alertas').select('*', { count: 'exact', head: true }).eq('estado', 'activa');
       let usersQuery = supabase.from('usuarios').select('*', { count: 'exact', head: true });
       let devicesQuery = supabase.from('dispositivos').select('*', { count: 'exact', head: true });
       let communitiesQuery = supabase.from('comunidades').select('*', { count: 'exact', head: true });
 
-      if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-        alertsQuery = alertsQuery.eq('id_comunidad', userProfile.id_comunidad);
-        usersQuery = usersQuery.eq('id_comunidad', userProfile.id_comunidad);
-        devicesQuery = devicesQuery.eq('id_comunidad', userProfile.id_comunidad);
-        communitiesQuery = communitiesQuery.eq('id', userProfile.id_comunidad);
+      if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+        alertsQuery = alertsQuery.eq('id_comunidad', profile.id_comunidad);
+        usersQuery = usersQuery.eq('id_comunidad', profile.id_comunidad);
+        devicesQuery = devicesQuery.eq('id_comunidad', profile.id_comunidad);
+        communitiesQuery = communitiesQuery.eq('id', profile.id_comunidad);
       }
 
       const { count: activeAlertsCount } = await alertsQuery;
@@ -532,13 +567,13 @@ export default function App() {
     }
   };
 
-  const fetchAlertas = async () => {
+  const fetchAlertas = async (profile = userProfile) => {
     let query = supabase
       .from('alertas')
       .select('*, emisor:usuarios(nombre), comunidad:comunidades(nombre)');
     
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      query = query.eq('id_comunidad', userProfile.id_comunidad);
+    if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+      query = query.eq('id_comunidad', profile.id_comunidad);
     }
 
     const { data } = await query.order('created_at', { ascending: false });
@@ -565,37 +600,37 @@ export default function App() {
     return data;
   };
 
-  const fetchUsuarios = async () => {
+  const fetchUsuarios = async (profile = userProfile) => {
     let query = supabase
       .from('usuarios')
       .select('*, comunidad:comunidades(nombre)');
 
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      query = query.eq('id_comunidad', userProfile.id_comunidad);
+    if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+      query = query.eq('id_comunidad', profile.id_comunidad);
     }
 
     const { data } = await query.order('created_at', { ascending: false });
     if (data) setUsuarios(data);
   };
 
-  const fetchComunidades = async () => {
+  const fetchComunidades = async (profile = userProfile) => {
     let query = supabase.from('comunidades').select('*');
 
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      query = query.eq('id', userProfile.id_comunidad);
+    if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+      query = query.eq('id', profile.id_comunidad);
     }
 
     const { data } = await query.order('created_at', { ascending: false });
     if (data) setComunidades(data);
   };
 
-  const fetchDispositivos = async () => {
+  const fetchDispositivos = async (profile = userProfile) => {
     let query = supabase
       .from('dispositivos')
       .select('*, usuario:usuarios(nombre), comunidad:comunidades(nombre)');
 
-    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
-      query = query.eq('id_comunidad', userProfile.id_comunidad);
+    if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+      query = query.eq('id_comunidad', profile.id_comunidad);
     }
 
     const { data } = await query.order('created_at', { ascending: false });
@@ -646,15 +681,12 @@ export default function App() {
       
       if (error) throw error;
       
-      // Verify role in usuarios table using parameter bindings (Supabase JS auto-binds params safely)
-      const { data: userData, error: userError } = await supabase
-        .from('usuarios')
-        .select('rol')
-        .eq('id', data.user.id)
-        .single();
+      // Cargar perfil completo y verificar rol administrativo
+      const profile = await loadProfile(data.user);
 
-      if (userError || !userData || !['admin', 'super_admin'].includes(userData.rol)) {
+      if (!profile || !['admin', 'super_admin'].includes(profile.rol)) {
         await supabase.auth.signOut();
+        setUserProfile(null);
         throw new Error('No tienes permisos de administrador para ingresar al panel.');
       }
 
@@ -682,8 +714,19 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setUserProfile(null);
     setEmail('');
     setPassword('');
+    setAlertas([]);
+    setUsuarios([]);
+    setComunidades([]);
+    setDispositivos([]);
+    setStats({
+      activeAlerts: 0,
+      totalUsers: 0,
+      totalDevices: 0,
+      totalCommunities: 0
+    });
     setCurrentPage('home');
   };
 
@@ -1348,7 +1391,7 @@ export default function App() {
                         <div className="text-[10px] font-semibold text-[#00E5FF] uppercase tracking-wider flex items-center gap-1">
                           <ShieldCheck className="w-2.5 h-2.5 flex-shrink-0" />
                           <span className="truncate max-w-[90px]">
-                            {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                            {['super_admin', 'superadmin'].includes(userProfile?.rol) ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
                           </span>
                         </div>
                       </div>
@@ -1390,14 +1433,14 @@ export default function App() {
                             </p>
                             <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                               <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                userProfile?.rol === 'superadmin'
+                                ['super_admin', 'superadmin'].includes(userProfile?.rol)
                                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
                                   : userProfile?.rol === 'admin'
                                   ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
                                   : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                               }`}>
                                 <ShieldCheck className="w-3 h-3" />
-                                {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                                {['super_admin', 'superadmin'].includes(userProfile?.rol) ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
                               </span>
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -1416,7 +1459,7 @@ export default function App() {
                               <span>Comunidad:</span>
                             </div>
                             <span className="font-semibold text-gray-200 text-right truncate max-w-[180px]">
-                              {userProfile?.nombre_comunidad || (userProfile?.rol === 'superadmin' ? '🌐 Acceso Global (Todas)' : 'No asignada')}
+                              {userProfile?.nombre_comunidad || (['super_admin', 'superadmin'].includes(userProfile?.rol) ? '🌐 Acceso Global (Todas)' : 'No asignada')}
                             </span>
                           </div>
 
@@ -1532,7 +1575,7 @@ export default function App() {
                       </div>
                       <div className="text-[10px] font-semibold text-[#00E5FF] uppercase tracking-wider flex items-center gap-1 mt-0.5">
                         <ShieldCheck className="w-2.5 h-2.5" />
-                        {userProfile?.rol === 'superadmin' ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
+                        {['super_admin', 'superadmin'].includes(userProfile?.rol) ? 'Super Admin' : userProfile?.rol === 'admin' ? 'Admin Local' : (userProfile?.rol || 'Vecino')}
                       </div>
                     </div>
                   </div>
@@ -2206,8 +2249,10 @@ export default function App() {
                 </h1>
                 <p className="text-gray-400 text-sm mt-1">
                   {userProfile && userProfile.rol === 'admin' 
-                    ? `Monitoreo del sector: ${userProfile.nombre_comunidad || 'Cargando...'}`
-                    : 'Monitoreo global de incidencias barriales (Super Admin)'}
+                    ? `Monitoreo del sector: ${userProfile.nombre_comunidad || 'Cargando sector...'}`
+                    : userProfile && ['super_admin', 'superadmin'].includes(userProfile.rol)
+                    ? 'Monitoreo global de incidencias barriales (Super Admin)'
+                    : 'Cargando consola de seguridad...'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
