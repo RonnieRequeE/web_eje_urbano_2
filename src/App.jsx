@@ -356,7 +356,8 @@ export default function App() {
                 type: 'UPDATE_COORDS',
                 id: payload.new.id,
                 lat: targetLat,
-                lng: targetLng
+                lng: targetLng,
+                tipo: payload.new.tipo
               }, '*');
             }
           } else if (!isActiva) {
@@ -2450,7 +2451,17 @@ export default function App() {
                               <td className="px-6 py-4 font-mono text-xs text-gray-400">{alerta.id}</td>
                               <td className="px-6 py-4 font-semibold">{alerta.emisor?.nombre || 'Botón Físico / Anónimo'}</td>
                               <td className="px-6 py-4">
-                                <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${alerta.tipo === 'ROBO' || alerta.tipo === 'SOS' ? 'bg-red-500/10 text-red-400 border-red-500/20' : alerta.tipo === 'MEDICA' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'}`}>
+                                <span className={`px-2.5 py-1 rounded-full text-xs font-extrabold border ${
+                                  alerta.tipo === 'ROBO' || alerta.tipo === 'SOS' 
+                                    ? 'bg-red-500/10 text-red-400 border-red-500/20' 
+                                    : alerta.tipo === 'MEDICA' || alerta.tipo === 'MÉDICA'
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                                    : alerta.tipo === 'INCENDIO'
+                                    ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                                    : alerta.tipo === 'DESASTRE'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                    : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                }`}>
                                   {alerta.tipo}
                                 </span>
                               </td>

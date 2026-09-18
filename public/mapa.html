@@ -123,6 +123,7 @@
       if (!Array.isArray(alertsList)) return;
 
       var currentIds = {};
+      var currentWalkingIds = {};
       var validCoords = [];
 
       alertsList.forEach(function(alerta) {
@@ -136,9 +137,15 @@
         var fechaFormateada = fecha.toLocaleDateString('es-ES');
         var vecinoNombre = (alerta.emisor?.nombre || 'Botón Físico / Anónimo');
 
+        // Las alertas fijas (MEDICA, INCENDIO, DESASTRE) NO usan muñequito de rastreo
+        var tipoNorm = (alerta.tipo || '').toUpperCase().trim();
+        var esAlertaFija = (tipoNorm === 'MEDICA' || tipoNorm === 'MÉDICA' || tipoNorm === 'INCENDIO' || tipoNorm === 'DESASTRE');
+        var esAlertaRastreable = !esAlertaFija;
+
         // 1. MARCADOR DE ORIGEN / ESCENA (Punto rojo)
+        var tituloPopup = '🚨 ' + alerta.tipo + (esAlertaFija ? ' (Ubicación de Emergencia)' : ' (Lugar de Origen)');
         var popupEscena = '<div class="popup-box">' +
-          '<h3>🚨 ' + alerta.tipo + ' (Lugar de Origen)</h3>' +
+          '<h3>' + tituloPopup + '</h3>' +
           '<p><strong>Vecino:</strong> ' + vecinoNombre + '</p>' +
           '<p><strong>Origen:</strong> ' + alerta.origen + '</p>' +
           '<p><strong>Comunidad:</strong> ' + (alerta.comunidad?.nombre || 'General') + '</p>' +
@@ -167,11 +174,12 @@
         }
 
         // 2. MARCADOR DEL MUÑEQUITO (Rastreo móvil en vivo)
-        var esAlertaRastreable = (alerta.tipo === 'ROBO' || alerta.tipo === 'SOS' || alerta.latitud_actual);
+        // Solo para alertas rastreables (ROBO, SOS, etc. - NUNCA en médica, incendio o desastre)
         var latActual = (alerta.latitud_actual != null) ? alerta.latitud_actual : alerta.latitud;
         var lngActual = (alerta.longitud_actual != null) ? alerta.longitud_actual : alerta.longitud;
 
         if (esAlertaRastreable) {
+          currentWalkingIds[alerta.id] = true;
           validCoords.push([latActual, lngActual]);
 
           var popupMuñeco = '<div class="popup-box">' +
@@ -230,14 +238,15 @@
           delete markersMap[id];
         }
       }
+      // Limpiar muñequitos que ya no existan o pertenezcan a alertas fijas
       for (var id in walkingMarkersMap) {
-        if (!currentIds[id]) {
+        if (!currentWalkingIds[id]) {
           map.removeLayer(walkingMarkersMap[id]);
           delete walkingMarkersMap[id];
         }
       }
       for (var id in polylineMap) {
-        if (!currentIds[id]) {
+        if (!currentWalkingIds[id]) {
           map.removeLayer(polylineMap[id]);
           delete polylineMap[id];
         }
@@ -268,6 +277,14 @@
         var id = event.data.id;
         var lat = Number(event.data.lat);
         var lng = Number(event.data.lng);
+        var tipoNorm = event.data.tipo ? String(event.data.tipo).toUpperCase().trim() : '';
+        var esAlertaFija = (tipoNorm === 'MEDICA' || tipoNorm === 'MÉDICA' || tipoNorm === 'INCENDIO' || tipoNorm === 'DESASTRE');
+
+        if (esAlertaFija) {
+          // Las alertas médicas, de incendio y desastre no usan muñequito
+          return;
+        }
+
         if (id && lat && lng) {
           if (walkingMarkersMap[id]) {
             walkingMarkersMap[id].setLatLng([lat, lng]);
@@ -285,7 +302,7 @@
                 }).addTo(map);
               }
             }
-          } else {
+          } else if (markersMap[id]) {
             var walkingIcon = L.divIcon({
               html: walkingIconHtml,
               className: '',
