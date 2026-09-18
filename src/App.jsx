@@ -199,7 +199,8 @@ export default function App() {
           await supabase.auth.signOut();
           setUser(null);
           setUserProfile(null);
-          setCurrentPage('home');
+          setCurrentPage('login');
+          setLoginError('Acceso exclusivo para Administradores. La plataforma web está reservada únicamente para la gestión de Administradores.');
         }
       } else {
         setUser(null);
@@ -213,7 +214,7 @@ export default function App() {
       if (event === 'SIGNED_OUT' || !session?.user) {
         setUser(null);
         setUserProfile(null);
-        setCurrentPage('home');
+        setCurrentPage((prev) => (prev === 'dashboard' ? 'login' : prev));
       }
     });
 
@@ -222,6 +223,16 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Proteger la consola de seguridad contra accesos no autorizados
+  useEffect(() => {
+    if (currentPage === 'dashboard' && !loadingUser) {
+      if (!user || (userProfile && !['admin', 'super_admin'].includes(userProfile.rol))) {
+        setCurrentPage('login');
+        setLoginError('Acceso exclusivo para Administradores. La plataforma web está reservada únicamente para la gestión de Administradores.');
+      }
+    }
+  }, [currentPage, user, userProfile, loadingUser]);
 
   // Fetch Dashboard Stats & Realtime subscriptions
   useEffect(() => {
@@ -686,8 +697,11 @@ export default function App() {
 
       if (!profile || !['admin', 'super_admin'].includes(profile.rol)) {
         await supabase.auth.signOut();
+        setUser(null);
         setUserProfile(null);
-        throw new Error('No tienes permisos de administrador para ingresar al panel.');
+        setLoginError('Acceso exclusivo para Administradores. La plataforma web está reservada únicamente para la gestión de Administradores.');
+        setFormLoading(false);
+        return;
       }
 
       // Success: Reset brute force tracker
@@ -1965,7 +1979,7 @@ export default function App() {
               <div className="text-center mb-8">
                 <Shield className="w-12 h-12 text-[#00E5FF] mx-auto mb-3" />
                 <h2 className="text-2xl font-bold text-white">Acceso Administrativo</h2>
-                <p className="text-gray-400 text-sm mt-1">Ingresa tus credenciales autorizadas por Supabase</p>
+                <p className="text-gray-400 text-sm mt-1">Ingresa tus credenciales de administrador</p>
               </div>
 
               {loginError && (
