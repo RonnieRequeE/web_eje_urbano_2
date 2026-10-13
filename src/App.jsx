@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabaseClient';
 import { 
@@ -40,7 +40,13 @@ import {
   FileText,
   BarChart3,
   Clock,
-  Sparkles
+  Sparkles,
+  Printer,
+  TrendingUp,
+  Filter,
+  Search,
+  FileSpreadsheet,
+  Layers
 } from 'lucide-react';
 
 export default function App() {
@@ -63,6 +69,17 @@ export default function App() {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState('');
   const [resetSuccess, setResetSuccess] = useState('');
+  const [resetCooldown, setResetCooldown] = useState(0);
+  const [otpAttempts, setOtpAttempts] = useState(0);
+
+  // Timer para cooldown de recuperación (SEC-08)
+  useEffect(() => {
+    if (resetCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldown]);
 
   // Dashboard Stats
   const [stats, setStats] = useState({
@@ -132,15 +149,1141 @@ export default function App() {
   const [mapTheme, setMapTheme] = useState('dark'); // 'dark' or 'light'
   const [selectedAlerta, setSelectedAlerta] = useState(null); // focused alert coordinates {lat, lng, id}
   const [activeFeatureModal, setActiveFeatureModal] = useState(null); // 'sos' or 'map' or null
-  const [loginAttempts, setLoginAttempts] = useState(0);
-  const [lockUntil, setLockUntil] = useState(null);
+  const [loginAttempts, setLoginAttempts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('eje_login_attempts');
+      return saved ? Number(saved) : 0;
+    } catch { return 0; }
+  });
+  const [lockUntil, setLockUntil] = useState(() => {
+    try {
+      const saved = localStorage.getItem('eje_lock_until');
+      if (saved && Number(saved) > Date.now()) {
+        return Number(saved);
+      }
+      return null;
+    } catch { return null; }
+  });
   const [requestTimestamps, setRequestTimestamps] = useState([]); // for rate limiting / flood protection
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [manageAlerta, setManageAlerta] = useState(null); // Alerta seleccionada para gestionar su estado
+
+  // --- Estados para Módulo de Reportes y Auditoría Vecinal ---
+  const [reportCommunityId, setReportCommunityId] = useState('todas');
+  const [reportDateRange, setReportDateRange] = useState('30d'); // '7d', '30d', '90d', 'anio', 'todo', 'personalizado'
+  const [reportStartDate, setReportStartDate] = useState('');
+  const [reportEndDate, setReportEndDate] = useState('');
+  const [reportTypeFilter, setReportTypeFilter] = useState('todos'); // 'todos', 'ROBO', 'SOS', 'MEDICA', 'INCENDIO', 'DESASTRE'
+  const [reportStatusFilter, setReportStatusFilter] = useState('todos'); // 'todos', 'activa', 'finalizada', 'falsa_alarma'
+  const [reportSearchTerm, setReportSearchTerm] = useState('');
+  const [activeReportPreview, setActiveReportPreview] = useState(null); // 'bitacora', 'estadisticas', 'horaspico', 'padron', 'recurrentes', 'acta'
+
+  // Sincronización estricta de comunidad según rol
+  useEffect(() => {
+    if (userProfile?.rol === 'admin' && userProfile?.id_comunidad) {
+      setReportCommunityId(userProfile.id_comunidad);
+    } else if (userProfile?.rol === 'super_admin') {
+      setReportCommunityId(prev => (prev && prev !== userProfile?.id_comunidad ? prev : 'todas'));
+    }
+  }, [userProfile]);
+
+  // Nombre legible de la comunidad activa en reportes
+  const activeReportCommunityName = useMemo(() => {
+    if (userProfile?.rol === 'admin') {
+      return userProfile?.nombre_comunidad || 'Comunidad Asignada';
+    }
+    if (reportCommunityId === 'todas') {
+      return 'Todas las Comunidades (Consolidado General)';
+    }
+    const found = comunidades.find(c => String(c.id) === String(reportCommunityId));
+    return found ? found.nombre : 'Comunidad Seleccionada';
+  }, [userProfile, reportCommunityId, comunidades]);
+
+  // Etiqueta legible del rango de fechas
+  const reportDateRangeLabel = useMemo(() => {
+    if (reportDateRange === '7d') return 'Últimos 7 Días';
+    if (reportDateRange === '30d') return 'Últimos 30 Días';
+    if (reportDateRange === '90d') return 'Últimos 90 Días';
+    if (reportDateRange === 'anio') return `Año en Curso (${new Date().getFullYear()})`;
+    if (reportDateRange === 'todo') return 'Histórico Completo';
+    if (reportDateRange === 'personalizado') {
+      return `${reportStartDate || 'Inicio'} hasta ${reportEndDate || 'Actualidad'}`;
+    }
+    return 'Período Activo';
+  }, [reportDateRange, reportStartDate, reportEndDate]);
+
+  // Alertas filtradas para reportes (Excluye IoT y Acompáñame a Casa)
+  const filteredReportAlertas = useMemo(() => {
+    return alertas.filter(alerta => {
+      // 1. Excluir IoT (sirenas y botones físicos)
+      const origen = (alerta.origen || '').toLowerCase();
+      const tipo = (alerta.tipo || '').toUpperCase();
+      if (origen === 'iot' || origen === 'boton_fisico' || tipo === 'BOTON_FISICO' || tipo === 'SIRENA') {
+        return false;
+      }
+
+      // 2. Excluir Acompáñame a Casa (trayectos y monitoreo)
+      if (tipo === 'TRAYECTO' || tipo === 'ACOMPANAME' || tipo === 'ACOMPÁÑAME' || tipo === 'MONITOREO_TRAYECTO' || origen === 'monitoreo_trayecto' || tipo.includes('TRAYECTO')) {
+        return false;
+      }
+
+      // 3. Filtro por Comunidad y Rol
+      if (userProfile?.rol === 'admin') {
+        if (alerta.id_comunidad && alerta.id_comunidad !== userProfile.id_comunidad) {
+          return false;
+        }
+      } else if (reportCommunityId !== 'todas') {
+        if (alerta.id_comunidad && String(alerta.id_comunidad) !== String(reportCommunityId)) {
+          return false;
+        }
+      }
+
+      // 4. Filtro por Rango de Fechas
+      if (reportDateRange !== 'todo' && alerta.created_at) {
+        const itemDate = new Date(alerta.created_at);
+        const now = new Date();
+        if (reportDateRange === '7d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 7);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === '30d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 30);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === '90d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 90);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === 'anio') {
+          const limit = new Date(now.getFullYear(), 0, 1);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === 'personalizado') {
+          if (reportStartDate && itemDate < new Date(reportStartDate + 'T00:00:00')) return false;
+          if (reportEndDate && itemDate > new Date(reportEndDate + 'T23:59:59')) return false;
+        }
+      }
+
+      // 5. Filtro por Tipo de Emergencia
+      if (reportTypeFilter !== 'todos') {
+        if (reportTypeFilter === 'MEDICA') {
+          if (tipo !== 'MEDICA' && tipo !== 'MÉDICA') return false;
+        } else if (tipo !== reportTypeFilter) {
+          return false;
+        }
+      }
+
+      // 6. Filtro por Estado
+      if (reportStatusFilter !== 'todos') {
+        if (reportStatusFilter === 'finalizada') {
+          if (alerta.estado !== 'finalizada' && alerta.estado !== 'atendida') return false;
+        } else if (alerta.estado !== reportStatusFilter) {
+          return false;
+        }
+      }
+
+      // 7. Filtro por Búsqueda (nombre vecino emisor, ID de alerta, comunidad, dirección)
+      if (reportSearchTerm.trim()) {
+        const term = reportSearchTerm.toLowerCase();
+        const emisorNom = (alerta.emisor?.nombre || '').toLowerCase();
+        const comNom = (alerta.comunidad?.nombre || '').toLowerCase();
+        const idStr = String(alerta.id || '').toLowerCase();
+        const dirStr = String(alerta.direccion || '').toLowerCase();
+        if (!emisorNom.includes(term) && !comNom.includes(term) && !idStr.includes(term) && !dirStr.includes(term)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [alertas, userProfile, reportCommunityId, reportDateRange, reportStartDate, reportEndDate, reportTypeFilter, reportStatusFilter, reportSearchTerm]);
+
+  // Vecinos filtrados para Padrón Vecinal según rol y comunidad
+  const filteredReportUsuarios = useMemo(() => {
+    return usuarios.filter(usuario => {
+      if (userProfile?.rol === 'admin') {
+        if (usuario.id_comunidad && usuario.id_comunidad !== userProfile.id_comunidad) {
+          return false;
+        }
+      } else if (reportCommunityId !== 'todas') {
+        if (usuario.id_comunidad && String(usuario.id_comunidad) !== String(reportCommunityId)) {
+          return false;
+        }
+      }
+
+      if (reportSearchTerm.trim()) {
+        const term = reportSearchTerm.toLowerCase();
+        const nom = (usuario.nombre || '').toLowerCase();
+        const dir = (usuario.direccion || '').toLowerCase();
+        const tel = (usuario.telefono || '').toLowerCase();
+        const email = (usuario.email || '').toLowerCase();
+        if (!nom.includes(term) && !dir.includes(term) && !tel.includes(term) && !email.includes(term)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [usuarios, userProfile, reportCommunityId, reportSearchTerm]);
+
+  // Vecinos recurrentes con 2 o más emergencias en el periodo
+  const reportRecurrentes = useMemo(() => {
+    const map = {};
+    filteredReportAlertas.forEach(a => {
+      const emisorKey = a.id_usuario || a.emisor?.nombre || (`alerta-${a.id}`);
+      const nombre = a.emisor?.nombre || 'Vecino Registrado';
+      const telefono = a.emisor?.telefono || 'No registrado';
+      const com = a.comunidad?.nombre || activeReportCommunityName;
+      if (!map[emisorKey]) {
+        map[emisorKey] = {
+          id: emisorKey,
+          nombre,
+          telefono,
+          comunidad: com,
+          total: 0,
+          tipos: {},
+          ultimaFecha: a.created_at
+        };
+      }
+      map[emisorKey].total += 1;
+      const t = a.tipo || 'SOS';
+      map[emisorKey].tipos[t] = (map[emisorKey].tipos[t] || 0) + 1;
+      if (new Date(a.created_at) > new Date(map[emisorKey].ultimaFecha)) {
+        map[emisorKey].ultimaFecha = a.created_at;
+      }
+    });
+
+    return Object.values(map)
+      .filter(item => item.total >= 2)
+      .sort((a, b) => b.total - a.total);
+  }, [filteredReportAlertas, activeReportCommunityName]);
+
+  // Estadísticas calculadas, métricas y franjas horarias
+  const reportCalculatedStats = useMemo(() => {
+    const total = filteredReportAlertas.length;
+    const atendidas = filteredReportAlertas.filter(a => a.estado === 'finalizada' || a.estado === 'atendida').length;
+    const activas = filteredReportAlertas.filter(a => a.estado === 'activa').length;
+    const falsas = filteredReportAlertas.filter(a => a.estado === 'falsa_alarma').length;
+    const tasaResolucion = total > 0 ? Math.round(((atendidas + falsas) / total) * 100) : 100;
+
+    const tipos = {
+      ROBO: 0,
+      SOS: 0,
+      MEDICA: 0,
+      INCENDIO: 0,
+      DESASTRE: 0,
+      OTROS: 0
+    };
+
+    filteredReportAlertas.forEach(a => {
+      const t = (a.tipo || '').toUpperCase();
+      if (t === 'ROBO') tipos.ROBO += 1;
+      else if (t === 'SOS') tipos.SOS += 1;
+      else if (t === 'MEDICA' || t === 'MÉDICA') tipos.MEDICA += 1;
+      else if (t === 'INCENDIO') tipos.INCENDIO += 1;
+      else if (t === 'DESASTRE') tipos.DESASTRE += 1;
+      else tipos.OTROS += 1;
+    });
+
+    const franjas = {
+      madrugada: 0, // 00:00 a 05:59
+      manana: 0,    // 06:00 a 11:59
+      tarde: 0,     // 12:00 a 17:59
+      noche: 0      // 18:00 a 23:59
+    };
+
+    const diasSemana = {
+      'Lunes': 0,
+      'Martes': 0,
+      'Miércoles': 0,
+      'Jueves': 0,
+      'Viernes': 0,
+      'Sábado': 0,
+      'Domingo': 0
+    };
+    const dayMap = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+    filteredReportAlertas.forEach(a => {
+      if (!a.created_at) return;
+      const d = new Date(a.created_at);
+      const h = d.getHours();
+      if (h >= 0 && h < 6) franjas.madrugada += 1;
+      else if (h >= 6 && h < 12) franjas.manana += 1;
+      else if (h >= 12 && h < 18) franjas.tarde += 1;
+      else franjas.noche += 1;
+
+      const dName = dayMap[d.getDay()];
+      if (diasSemana[dName] !== undefined) diasSemana[dName] += 1;
+    });
+
+    let maxF = -1;
+    let franjaCritica = 'Noche (18:00 - 23:59)';
+    const franjaLabels = {
+      madrugada: 'Madrugada (00:00 - 05:59)',
+      manana: 'Mañana (06:00 - 11:59)',
+      tarde: 'Tarde (12:00 - 17:59)',
+      noche: 'Noche (18:00 - 23:59)'
+    };
+    Object.entries(franjas).forEach(([k, v]) => {
+      if (v > maxF) {
+        maxF = v;
+        franjaCritica = franjaLabels[k];
+      }
+    });
+
+    let maxD = -1;
+    let diaCritico = 'Sábado';
+    Object.entries(diasSemana).forEach(([k, v]) => {
+      if (v > maxD) {
+        maxD = v;
+        diaCritico = k;
+      }
+    });
+
+    let maxT = -1;
+    let tipoPredominante = 'SOS';
+    Object.entries(tipos).forEach(([k, v]) => {
+      if (v > maxT) {
+        maxT = v;
+        tipoPredominante = k;
+      }
+    });
+
+    return {
+      total,
+      atendidas,
+      activas,
+      falsas,
+      tasaResolucion,
+      tipos,
+      franjas,
+      franjaCritica,
+      diasSemana,
+      diaCritico,
+      tipoPredominante: total > 0 ? tipoPredominante : 'Ninguno',
+      totalVecinos: filteredReportUsuarios.length
+    };
+  }, [filteredReportAlertas, filteredReportUsuarios]);
+
+  // Exportación a Excel / CSV con soporte UTF-8 BOM
+  const exportToCSV = (filename, headers, rows) => {
+    const sanitize = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+    const csvContent = '\uFEFF' + [
+      headers.map(sanitize).join(','),
+      ...rows.map(row => row.map(sanitize).join(','))
+    ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportBitacoraCSV = () => {
+    const cleanComName = activeReportCommunityName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `bitacora_alertas_${cleanComName}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const headers = [
+      'N°',
+      'ID Alerta',
+      'Vecino que Activó',
+      'Teléfono Contacto',
+      'Tipo de Emergencia',
+      'Estado',
+      'Comunidad',
+      'Fecha y Hora',
+      'Latitud Inicial',
+      'Longitud Inicial'
+    ];
+    const rows = filteredReportAlertas.map((a, idx) => [
+      idx + 1,
+      a.id,
+      a.emisor?.nombre || 'Vecino Registrado',
+      a.emisor?.telefono || 'No registrado',
+      a.tipo || 'SOS',
+      a.estado || 'activa',
+      a.comunidad?.nombre || activeReportCommunityName,
+      a.created_at ? new Date(a.created_at).toLocaleString() : 'N/A',
+      a.latitud != null ? a.latitud : 'N/A',
+      a.longitud != null ? a.longitud : 'N/A'
+    ]);
+    exportToCSV(filename, headers, rows);
+  };
+
+  const handleExportPadronCSV = () => {
+    const cleanComName = activeReportCommunityName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `padron_vecinal_${cleanComName}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const headers = [
+      'N°',
+      'ID Usuario',
+      'Nombre Completo',
+      'Teléfono',
+      'Dirección / Manzano',
+      'Rol',
+      'Estado',
+      'Comunidad',
+      'Fecha de Registro'
+    ];
+    const rows = filteredReportUsuarios.map((u, idx) => [
+      idx + 1,
+      u.id,
+      u.nombre || 'Sin nombre',
+      u.telefono || 'No registrado',
+      u.direccion || 'Sin dirección',
+      u.rol || 'vecino',
+      u.estado || 'activo',
+      u.comunidad?.nombre || activeReportCommunityName,
+      u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'
+    ]);
+    exportToCSV(filename, headers, rows);
+  };
+
+  // Generador de documento HTML 100% monocromático en formato Carta para impresión / PDF
+  const generateReportHTML = (reportKey) => {
+    const comName = activeReportCommunityName || 'Comunidad Asignada';
+    const rangeLabel = reportDateRangeLabel || 'Período Auditado';
+    const emisorName = userProfile?.nombre || 'Administración Eje Urbano';
+    const fechaEmision = new Date().toLocaleString();
+    const certCode = `AUD-SEC-${Date.now().toString().slice(-6)}`;
+
+    let reportTitle = '';
+    let scopeDesc = '';
+    let bodyContent = '';
+
+    if (reportKey === 'bitacora') {
+      reportTitle = '1. BITÁCORA OFICIAL DE ALERTAS E INCIDENCIAS VECINALES';
+      scopeDesc = 'Relación cronológica detallada de emergencias vecinales registradas y atendidas en el período auditado. Excluye activaciones de dispositivos físicos IoT y trayectos de acompañamiento individual.';
+      
+      const rowsHTML = filteredReportAlertas.length === 0
+        ? `<tr><td colspan="9" style="text-align:center; padding: 20px; font-style:italic;">No se registran emergencias en el período auditado.</td></tr>`
+        : filteredReportAlertas.map((a, idx) => {
+            const gpsText = a.latitud != null ? `${Number(a.latitud).toFixed(4)}, ${Number(a.longitud).toFixed(4)}` : 'Sin GPS';
+            const estadoTag = a.estado === 'activa' ? '[ EN CURSO ]' : a.estado === 'falsa_alarma' ? '[ FALSA ALARMA ]' : '[ ATENDIDA ]';
+            const comLabel = a.comunidad?.nombre || (typeof a.comunidad === 'string' ? a.comunidad : comName);
+            return `
+              <tr>
+                <td style="text-align:center; font-family:monospace;">${idx + 1}</td>
+                <td style="text-align:center; font-family:monospace; font-weight:bold;">#${a.id}</td>
+                <td><strong>${a.emisor?.nombre || 'Vecino Registrado'}</strong></td>
+                <td>${a.emisor?.telefono || 'No registrado'}</td>
+                <td style="font-weight:bold;">${a.tipo || 'SOS'}</td>
+                <td>${comLabel}</td>
+                <td>${a.created_at ? new Date(a.created_at).toLocaleString() : 'N/A'}</td>
+                <td style="font-family:monospace; font-size:7.5pt;">${gpsText}</td>
+                <td style="text-align:center; font-weight:bold; font-size:7.5pt;">${estadoTag}</td>
+              </tr>
+            `;
+          }).join('');
+
+      bodyContent = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:3%; text-align:center;">#</th>
+              <th style="width:6%; text-align:center;">ID</th>
+              <th style="width:19%;">Vecino Emisor</th>
+              <th style="width:12%;">Teléfono</th>
+              <th style="width:10%;">Tipo</th>
+              <th style="width:14%;">Comunidad</th>
+              <th style="width:16%;">Fecha y Hora</th>
+              <th style="width:10%;">GPS Inicial</th>
+              <th style="width:10%; text-align:center;">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHTML}
+          </tbody>
+        </table>
+
+        <table class="summary-table">
+          <tr>
+            <td><strong>TOTAL AUDITADAS:</strong> ${filteredReportAlertas.length}</td>
+            <td><strong>ATENDIDAS:</strong> ${reportCalculatedStats.atendidas}</td>
+            <td><strong>EN CURSO:</strong> ${reportCalculatedStats.activas}</td>
+            <td><strong>FALSAS ALARMAS:</strong> ${reportCalculatedStats.falsas}</td>
+          </tr>
+        </table>
+      `;
+    } else if (reportKey === 'estadisticas') {
+      reportTitle = '2. INFORME ESTADÍSTICO Y MÉTRICAS DE EMERGENCIAS';
+      scopeDesc = 'Resumen analítico cuantitativo, distribución porcentual por tipo de incidente y cálculo formal de la tasa de resolución comunitaria.';
+      
+      const tipoRows = Object.entries(reportCalculatedStats.tipos).map(([tipo, cant]) => {
+        const pct = reportCalculatedStats.total > 0 ? Math.round((cant / reportCalculatedStats.total) * 100) : 0;
+        return `
+          <tr>
+            <td><strong>${tipo}</strong></td>
+            <td style="text-align:center; font-weight:bold;">${cant}</td>
+            <td style="text-align:center; font-weight:bold;">${pct}%</td>
+            <td>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" style="width: ${pct}%;"></div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      bodyContent = `
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-title">Total Emergencias</div>
+            <div class="kpi-value">${reportCalculatedStats.total}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Atendidas / Finalizadas</div>
+            <div class="kpi-value">${reportCalculatedStats.atendidas}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Tasa de Resolución</div>
+            <div class="kpi-value">${reportCalculatedStats.tasaResolucion}%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Emergencia Principal</div>
+            <div class="kpi-value" style="font-size:13pt;">${reportCalculatedStats.tipoPredominante}</div>
+          </div>
+        </div>
+
+        <div style="font-weight:bold; text-transform:uppercase; font-size:8.5pt; margin-bottom:6px; border-bottom:1px solid #000; padding-bottom:3px;">
+          Distribución Porcentual por Tipo de Incidencia:
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:30%;">Tipo de Incidencia</th>
+              <th style="width:15%; text-align:center;">Cantidad</th>
+              <th style="width:15%; text-align:center;">Porcentaje (%)</th>
+              <th style="width:40%;">Proporción Gráfica</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tipoRows}
+          </tbody>
+        </table>
+
+        <div class="note-box">
+          <strong>DIAGNÓSTICO Y RECOMENDACIÓN OPERATIVA:</strong><br>
+          La tasa de resolución comunitaria alcanzada es del <strong>${reportCalculatedStats.tasaResolucion}%</strong> sobre un universo de ${reportCalculatedStats.total} incidencias registradas. La tipología prevalente corresponde a <strong>${reportCalculatedStats.tipoPredominante}</strong>. Se aconseja reforzar los mecanismos de verificación inmediata vecinal y coordinar con los comités de vigilancia barrial.
+        </div>
+      `;
+    } else if (reportKey === 'horaspico') {
+      reportTitle = '3. ANÁLISIS DE HORAS PICO Y DÍAS CRÍTICOS';
+      scopeDesc = 'Patrón temporal y análisis horario para programación estratégica de rondas preventivas, guardias vecinales y turnos de vigilancia comunitaria.';
+
+      const franjasData = [
+        { name: 'Madrugada', time: '00:00 - 05:59', count: reportCalculatedStats.franjas.madrugada },
+        { name: 'Mañana', time: '06:00 - 11:59', count: reportCalculatedStats.franjas.manana },
+        { name: 'Tarde', time: '12:00 - 17:59', count: reportCalculatedStats.franjas.tarde },
+        { name: 'Noche', time: '18:00 - 23:59', count: reportCalculatedStats.franjas.noche }
+      ];
+
+      const franjaRows = franjasData.map(fr => {
+        const pct = reportCalculatedStats.total > 0 ? Math.round((fr.count / reportCalculatedStats.total) * 100) : 0;
+        const tag = pct >= 40 ? '[ CRÍTICO ]' : pct >= 25 ? '[ MODERADO ]' : '[ BAJO ]';
+        return `
+          <tr>
+            <td><strong>${fr.name}</strong></td>
+            <td style="text-align:center;">${fr.time}</td>
+            <td style="text-align:center; font-weight:bold;">${fr.count}</td>
+            <td style="text-align:center; font-weight:bold;">${pct}%</td>
+            <td style="text-align:center; font-weight:bold; font-size:7.5pt;">${tag}</td>
+          </tr>
+        `;
+      }).join('');
+
+      const diasRows = Object.entries(reportCalculatedStats.diasSemana).map(([dia, count]) => {
+        const isCritico = dia === reportCalculatedStats.diaCritico && count > 0;
+        const tag = isCritico ? '[ CRÍTICO - MAYOR REINCIDENCIA ]' : '[ NORMAL ]';
+        return `
+          <tr>
+            <td><strong>${dia}</strong></td>
+            <td style="text-align:center; font-weight:bold;">${count}</td>
+            <td style="text-align:center; font-weight:bold; font-size:7.5pt;">${tag}</td>
+          </tr>
+        `;
+      }).join('');
+
+      bodyContent = `
+        <div style="font-weight:bold; text-transform:uppercase; font-size:8.5pt; margin-bottom:6px; border-bottom:1px solid #000; padding-bottom:3px;">
+          1. Distribución por Franja Horaria (24 Horas):
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:25%;">Franja Horaria</th>
+              <th style="width:25%; text-align:center;">Horario</th>
+              <th style="width:15%; text-align:center;">Emergencias</th>
+              <th style="width:15%; text-align:center;">Porcentaje</th>
+              <th style="width:20%; text-align:center;">Nivel de Riesgo</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${franjaRows}
+          </tbody>
+        </table>
+
+        <div style="font-weight:bold; text-transform:uppercase; font-size:8.5pt; margin-top:14px; margin-bottom:6px; border-bottom:1px solid #000; padding-bottom:3px;">
+          2. Distribución Semanal por Días:
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:40%;">Día de la Semana</th>
+              <th style="width:25%; text-align:center;">Total Emergencias</th>
+              <th style="width:35%; text-align:center;">Evaluación</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${diasRows}
+          </tbody>
+        </table>
+
+        <div class="note-box">
+          <strong>RECOMENDACIÓN ESTRATÉGICA DE VIGILANCIA:</strong><br>
+          Se recomienda concentrar las rondas de patrullaje vecinal y alerta temprana durante la franja de <strong>${reportCalculatedStats.franjaCritica}</strong>, reforzando la comunicación activa principalmente los días <strong>${reportCalculatedStats.diaCritico}</strong>.
+        </div>
+      `;
+    } else if (reportKey === 'padron') {
+      reportTitle = '4. PADRÓN VECINAL OFICIAL Y COBERTURA COMUNITARIA';
+      scopeDesc = 'Censo oficial de vecinos empadronados y habilitados en la plataforma comunitaria Eje Urbano para la emisión y auxilio de emergencias.';
+
+      const rowsHTML = filteredReportUsuarios.length === 0
+        ? `<tr><td colspan="8" style="text-align:center; padding: 20px; font-style:italic;">No se registran vecinos empadronados para esta comunidad.</td></tr>`
+        : filteredReportUsuarios.map((u, idx) => {
+            const comUser = u.comunidad?.nombre || (typeof u.comunidad === 'string' ? u.comunidad : comName);
+            return `
+            <tr>
+              <td style="text-align:center; font-family:monospace;">${idx + 1}</td>
+              <td><strong>${u.nombre || 'Vecino'}</strong></td>
+              <td>${u.telefono || 'No registrado'}</td>
+              <td>${u.direccion || 'Sin dirección'}</td>
+              <td>${comUser}</td>
+              <td style="text-transform:uppercase; font-size:7.5pt;">${u.rol || 'vecino'}</td>
+              <td style="text-align:center; font-weight:bold; font-size:7.5pt;">[ ${(u.estado || 'activo').toUpperCase()} ]</td>
+              <td style="font-size:8pt;">${u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}</td>
+            </tr>
+          `;
+          }).join('');
+
+      bodyContent = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:3%; text-align:center;">#</th>
+              <th style="width:22%;">Nombre Completo</th>
+              <th style="width:13%;">Teléfono Contacto</th>
+              <th style="width:20%;">Dirección / Manzano</th>
+              <th style="width:16%;">Comunidad</th>
+              <th style="width:8%;">Rol</th>
+              <th style="width:9%; text-align:center;">Estado</th>
+              <th style="width:9%;">Fecha Alta</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHTML}
+          </tbody>
+        </table>
+
+        <table class="summary-table">
+          <tr>
+            <td><strong>TOTAL VECINOS CENSADOS:</strong> ${filteredReportUsuarios.length}</td>
+            <td><strong>JURISDICCIÓN:</strong> ${comName}</td>
+            <td><strong>ESTADO:</strong> 100% REGISTRADOS Y VERIFICADOS</td>
+          </tr>
+        </table>
+      `;
+    } else if (reportKey === 'recurrentes') {
+      reportTitle = '5. INFORME DE SEGUIMIENTO A VECINOS CON ACTIVACIONES RECURRENTES';
+      scopeDesc = 'Auditoría focalizada en vecinos con 2 o más emergencias en el período auditado, con el fin de detectar puntos vulnerables o canalizar auxilio preventivo prioritario.';
+
+      if (reportRecurrentes.length === 0) {
+        bodyContent = `
+          <div style="border: 1px solid #000; padding: 25px; text-align: center; margin-bottom: 15px;">
+            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase;">SIN VECINOS CON ACTIVACIONES RECURRENTES</div>
+            <p style="font-size: 9pt; margin-top: 6px; color: #333;">Ningún vecino registra 2 o más emergencias en el período seleccionado. El índice de recurrencia comunitaria se mantiene en 0%.</p>
+          </div>
+        `;
+      } else {
+        const rowsHTML = reportRecurrentes.map((item, idx) => {
+          const prioridadTag = item.total >= 3 ? '[ ALTA PRIORIDAD ]' : '[ SEGUIMIENTO ]';
+          return `
+            <tr>
+              <td style="text-align:center; font-family:monospace;">${idx + 1}</td>
+              <td><strong>${item.nombre}</strong></td>
+              <td>${item.telefono}</td>
+              <td>${item.comunidad}</td>
+              <td style="text-align:center; font-weight:bold; font-size:10pt;">${item.total}</td>
+              <td>${Object.keys(item.tipos).join(', ')}</td>
+              <td style="font-size:8pt;">${new Date(item.ultimaFecha).toLocaleDateString()}</td>
+              <td style="text-align:center; font-weight:bold; font-size:7.5pt;">${prioridadTag}</td>
+            </tr>
+          `;
+        }).join('');
+
+        bodyContent = `
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:4%; text-align:center;">#</th>
+                <th style="width:22%;">Vecino</th>
+                <th style="width:14%;">Teléfono</th>
+                <th style="width:18%;">Comunidad</th>
+                <th style="width:10%; text-align:center;">Total Alertas</th>
+                <th style="width:14%;">Tipos Frecuentes</th>
+                <th style="width:9%;">Última Act.</th>
+                <th style="width:9%; text-align:center;">Prioridad</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+          </table>
+
+          <div class="note-box">
+            <strong>PROTOCOLO DE ASISTENCIA Y VERIFICACIÓN EN TERRENO:</strong><br>
+            Se aconseja que el Administrador de Seguridad y el Comité Barrial realicen una inspección preventiva a los domicilios identificados para evaluar posibles causas como fallas de luminarias públicas, hostigamiento vecinal o necesidades de atención médica de urgencia.
+          </div>
+        `;
+      }
+    } else if (reportKey === 'acta') {
+      reportTitle = '6. ACTA OFICIAL DE SEGURIDAD VECINAL — RENDICIÓN PARA ASAMBLEA GENERAL';
+      scopeDesc = 'Formato institucional de rendición de cuentas para lectura, conocimiento y aprobación formal en Asamblea General de Vecinos.';
+
+      bodyContent = `
+        <div style="border: 1px solid #000; padding: 12px; margin-bottom: 14px; font-size: 9pt; line-height: 1.5; text-align: justify;">
+          En la fecha <strong>${new Date().toLocaleDateString()}</strong>, en la sede vecinal de la comunidad <strong>${comName}</strong>, se reúne el Directorio Comunitario y la Asamblea General de Vecinos con la finalidad de recibir y homologar el <strong>Informe Oficial de Seguridad y Prevención Ciudadana</strong> correspondiente al período auditado <strong>${rangeLabel}</strong>, emitido a través de la Plataforma Eje Urbano.
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-title">Vecinos Protegidos</div>
+            <div class="kpi-value">${reportCalculatedStats.totalVecinos}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Incidentes Atendidos</div>
+            <div class="kpi-value">${reportCalculatedStats.atendidas}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-title">Efectividad del Sistema</div>
+            <div class="kpi-value">${reportCalculatedStats.tasaResolucion}%</div>
+          </div>
+        </div>
+
+        <div style="font-weight:bold; text-transform:uppercase; font-size:8.5pt; margin-top:14px; margin-bottom:6px; border-bottom:1px solid #000; padding-bottom:3px;">
+          Acuerdos y Compromisos Aprobados en Asamblea:
+        </div>
+
+        <div style="border: 1px solid #000; padding: 10px; margin-bottom: 16px; font-size: 8.5pt; line-height: 1.5;">
+          <p style="margin: 0 0 8px 0;"><strong>1. Organización y Rondas Preventivas:</strong> Se aprueba mantener activas las alarmas comunitarias y coordinar rondas de vigilancia preventiva en horarios críticos.</p>
+          <p style="margin: 0 0 8px 0;"><strong>2. Actualización de Contactos:</strong> Todos los vecinos empadronados se comprometen a notificar oportunamente cualquier modificación en sus números telefónicos de emergencia.</p>
+          <p style="margin: 0;"><strong>3. Coordinación Policial y Municipal:</strong> Se autoriza a la Directiva remitir copia fehaciente de la presente bitácora al cuadrante policial correspondiente en caso de incidentes graves o reiterados.</p>
+        </div>
+
+        <div class="signatures-block">
+          <div style="text-align:center; font-size:8pt; font-weight:bold; text-transform:uppercase; margin-bottom:16px;">
+            Firmas de Conformidad y Aprobación Institucional
+          </div>
+          <div class="signatures-grid">
+            <div class="signature-item">
+              <div class="signature-line"></div>
+              <strong>${emisorName}</strong><br>
+              <span>Administrador(a) de Seguridad</span><br>
+              <span style="font-size:7.5pt; color:#555;">C.I.: ___________________</span>
+            </div>
+            <div class="signature-item">
+              <div class="signature-line"></div>
+              <strong>Presidente(a) Junta Vecinal</strong><br>
+              <span>Directorio Comunitario</span><br>
+              <span style="font-size:7.5pt; color:#555;">C.I.: ___________________</span>
+            </div>
+            <div class="signature-item">
+              <div class="signature-line"></div>
+              <strong>Secretario(a) de Actas</strong><br>
+              <span>Comité de Vigilancia</span><br>
+              <span style="font-size:7.5pt; color:#555;">C.I.: ___________________</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>${reportTitle} - Eje Urbano</title>
+  <style>
+    @page {
+      size: letter portrait;
+      margin: 14mm 15mm 14mm 15mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+      font-size: 8.5pt;
+      line-height: 1.35;
+      color: #000000;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+    }
+    .report-wrapper {
+      width: 100%;
+      margin: 0 auto;
+    }
+    .header-table {
+      width: 100%;
+      border-bottom: 2px solid #000000;
+      padding-bottom: 6px;
+      margin-bottom: 10px;
+    }
+    .title-block {
+      text-align: center;
+      margin: 10px 0 12px 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #000000;
+    }
+    .title-block h1 {
+      font-size: 11pt;
+      font-weight: 900;
+      text-transform: uppercase;
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+    .meta-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      margin-bottom: 12px;
+    }
+    .meta-table td {
+      border: 1px solid #000000;
+      padding: 4px 6px;
+      font-size: 8pt;
+    }
+    .scope-box {
+      border: 1px solid #000000;
+      border-left: 4px solid #000000;
+      padding: 6px 10px;
+      margin-bottom: 12px;
+      font-size: 8pt;
+      background: #ffffff;
+      line-height: 1.4;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      margin-bottom: 10px;
+    }
+    table.data-table thead {
+      display: table-header-group;
+    }
+    table.data-table th {
+      border: 1px solid #000000;
+      background: #f0f0f0;
+      color: #000000;
+      font-weight: bold;
+      text-transform: uppercase;
+      font-size: 7.5pt;
+      padding: 5px 4px;
+      text-align: left;
+    }
+    table.data-table td {
+      border: 1px solid #000000;
+      color: #000000;
+      font-size: 8pt;
+      padding: 4px 4px;
+      vertical-align: middle;
+    }
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    table.summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #000000;
+      margin-bottom: 12px;
+      background: #f7f7f7;
+    }
+    table.summary-table td {
+      border: 1px solid #000000;
+      padding: 5px 8px;
+      font-size: 8pt;
+      text-align: center;
+    }
+    .kpi-grid {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      width: 100%;
+    }
+    .kpi-card {
+      flex: 1;
+      border: 1px solid #000000;
+      padding: 8px;
+      text-align: center;
+      background: #ffffff;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .kpi-title {
+      font-size: 7.5pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #000000;
+      margin-bottom: 4px;
+    }
+    .kpi-value {
+      font-size: 15pt;
+      font-weight: 900;
+      color: #000000;
+    }
+    .progress-bar-container {
+      width: 100%;
+      height: 10px;
+      border: 1px solid #000000;
+      background: #ffffff;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: #000000;
+    }
+    .note-box {
+      border: 1px solid #000000;
+      padding: 8px 10px;
+      margin-top: 10px;
+      margin-bottom: 12px;
+      font-size: 8pt;
+      line-height: 1.4;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .signatures-block {
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px solid #000000;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .signatures-grid {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .signature-item {
+      flex: 1;
+      text-align: center;
+      font-size: 7.5pt;
+    }
+    .signature-line {
+      border-bottom: 1px solid #000000;
+      height: 35px;
+      margin-bottom: 5px;
+    }
+    .footer-block {
+      margin-top: 14px;
+      padding-top: 6px;
+      border-top: 1px solid #000000;
+      text-align: center;
+      font-size: 7pt;
+      color: #333333;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <div class="report-wrapper">
+    <table class="header-table">
+      <tr>
+        <td style="vertical-align:middle; width:70%;">
+          <div style="font-size:13pt; font-weight:900; text-transform:uppercase; letter-spacing:0.5px; margin:0;">
+            PLATAFORMA EJE URBANO
+          </div>
+          <div style="font-size:7.5pt; font-weight:bold; text-transform:uppercase; color:#333; margin-top:2px;">
+            Sistema Integral de Seguridad Ciudadana y Prevención Vecinal
+          </div>
+        </td>
+        <td style="vertical-align:middle; width:30%; text-align:right;">
+          <span style="font-family:monospace; font-size:7.5pt; font-weight:bold; border:1px solid #000; padding:2px 5px; display:inline-block;">
+            ${certCode}
+          </span>
+          <div style="font-size:7pt; color:#444; margin-top:2px;">Documento Oficial Certificado</div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="title-block">
+      <h1>${reportTitle}</h1>
+    </div>
+
+    <table class="meta-table">
+      <tr>
+        <td style="width:25%;">
+          <span style="font-size:7pt; color:#444; text-transform:uppercase; font-weight:bold; display:block;">Comunidad:</span>
+          <strong>${comName}</strong>
+        </td>
+        <td style="width:25%;">
+          <span style="font-size:7pt; color:#444; text-transform:uppercase; font-weight:bold; display:block;">Período Auditado:</span>
+          <strong>${rangeLabel}</strong>
+        </td>
+        <td style="width:25%;">
+          <span style="font-size:7pt; color:#444; text-transform:uppercase; font-weight:bold; display:block;">Fecha de Emisión:</span>
+          <strong>${fechaEmision}</strong>
+        </td>
+        <td style="width:25%;">
+          <span style="font-size:7pt; color:#444; text-transform:uppercase; font-weight:bold; display:block;">Emitido Por:</span>
+          <strong>${emisorName}</strong>
+        </td>
+      </tr>
+    </table>
+
+    <div class="scope-box">
+      <strong>ALCANCE DEL INFORME:</strong> ${scopeDesc}
+    </div>
+
+    ${bodyContent}
+
+    <div class="footer-block">
+      <div>Documento oficial generado electrónicamente por la Plataforma Eje Urbano — Válido para archivos vecinales, asambleas ciudadanas y coordinación policial.</div>
+      <div style="font-family:monospace; font-size:6.5pt; margin-top:2px;">Firma digital certificada: ${certCode}-${Date.now().toString()} — Prohibida su alteración o adulteración</div>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+  };
+
+  // Impresión y guardado a PDF limpio e infalible vía iframe aislado
+  const handlePrintReport = (reportKey) => {
+    const key = reportKey || activeReportPreview || 'bitacora';
+    const htmlContent = generateReportHTML(key);
+
+    let iframe = document.getElementById('eje-urbano-print-frame');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.id = 'eje-urbano-print-frame';
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.visibility = 'hidden';
+      document.body.appendChild(iframe);
+    }
+
+    const doc = iframe.contentWindow || iframe.contentDocument;
+    const docObj = doc.document || doc;
+    docObj.open();
+    docObj.write(htmlContent);
+    docObj.close();
+
+    setTimeout(() => {
+      try {
+        (iframe.contentWindow || iframe).focus();
+        (iframe.contentWindow || iframe).print();
+      } catch (e) {
+        console.error("Error al imprimir reporte vía iframe:", e);
+        window.print();
+      }
+    }, 350);
+  };
+
+  // HTML para Vista Previa en Pantalla: 100% idéntico al PDF pero adaptado visualmente a hoja Carta en visor
+  const previewReportHTML = useMemo(() => {
+    if (!activeReportPreview) return '';
+    const rawHTML = generateReportHTML(activeReportPreview);
+    return rawHTML.replace(
+      '</style>',
+      `
+    @media screen {
+      html, body {
+        background-color: #f1f5f9 !important;
+        margin: 0 !important;
+        padding: 24px 16px !important;
+      }
+      .report-wrapper {
+        max-width: 820px !important;
+        background: #ffffff !important;
+        padding: 14mm 16mm !important;
+        margin: 0 auto !important;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+        border: 1px solid #cbd5e1 !important;
+        box-sizing: border-box !important;
+        min-height: 1056px;
+      }
+      @media (max-width: 640px) {
+        html, body {
+          padding: 8px 4px !important;
+        }
+        .report-wrapper {
+          padding: 8mm 6mm !important;
+        }
+      }
+    }
+  </style>`
+    );
+  }, [
+    activeReportPreview,
+    activeReportCommunityName,
+    reportDateRangeLabel,
+    userProfile,
+    filteredReportAlertas,
+    filteredReportUsuarios,
+    reportCalculatedStats,
+    reportRecurrentes
+  ]);
+
   const mapIframeRef = useRef(null); // Referencia al iframe estático de mapa.html
   const alertasRef = useRef(alertas);
   const knownActiveAlertIds = useRef(new Set());
+  const audioCtxRef = useRef(null);
+  const lastAudioTimeRef = useRef(0);
+
+  // Reproductor de sonido de emergencia con singleton y debounce de 3s (SEC-09)
+  const playEmergencyBeep = async () => {
+    const now = Date.now();
+    if (now - lastAudioTimeRef.current < 3000) return;
+    lastAudioTimeRef.current = now;
+
+    try {
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        await audioCtxRef.current.resume();
+      }
+      const oscillator = audioCtxRef.current.createOscillator();
+      const gainNode = audioCtxRef.current.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(880, audioCtxRef.current.currentTime);
+      gainNode.gain.setValueAtTime(0.15, audioCtxRef.current.currentTime);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtxRef.current.destination);
+      oscillator.start();
+      oscillator.stop(audioCtxRef.current.currentTime + 0.6);
+    } catch (e) {
+      console.log("Audio feedback error: ", e);
+    }
+  };
   useEffect(() => {
     alertasRef.current = alertas;
   }, [alertas]);
@@ -263,24 +1406,8 @@ export default function App() {
           // --- CASO 1: Alerta nueva creada ---
           knownActiveAlertIds.current.add(payload.new.id);
 
-          // 1. Sonar pitido de emergencia
-          try {
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            if (audioCtx.state === 'suspended') {
-              await audioCtx.resume();
-            }
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-            gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.6);
-          } catch (e) {
-            console.log("Audio feedback error: ", e);
-          }
+          // 1. Sonar pitido de emergencia debounced (SEC-09)
+          await playEmergencyBeep();
 
           // 2. Conmutar a la pestaña de alertas y mover la vista al mapa
           setDashboardTab('alertas');
@@ -313,7 +1440,7 @@ export default function App() {
                   id: payload.new.id,
                   lat: targetLat,
                   lng: targetLng
-                }, '*');
+                }, window.location.origin);
               }
             }, 250);
           }
@@ -322,24 +1449,8 @@ export default function App() {
             // --- CASO 2: Alerta reactivada o activada desde otro estado ---
             knownActiveAlertIds.current.add(payload.new.id);
 
-            // 1. Sonar pitido de emergencia
-            try {
-              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-              if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-              }
-              const oscillator = audioCtx.createOscillator();
-              const gainNode = audioCtx.createGain();
-              oscillator.type = 'sine';
-              oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-              gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
-              oscillator.connect(gainNode);
-              gainNode.connect(audioCtx.destination);
-              oscillator.start();
-              oscillator.stop(audioCtx.currentTime + 0.6);
-            } catch (e) {
-              console.log("Audio feedback error: ", e);
-            }
+            // 1. Sonar pitido de emergencia debounced (SEC-09)
+            await playEmergencyBeep();
 
             // 2. Conmutar a la pestaña de alertas y mover la vista al mapa
             setDashboardTab('alertas');
@@ -372,7 +1483,7 @@ export default function App() {
                     id: payload.new.id,
                     lat: targetLat,
                     lng: targetLng
-                  }, '*');
+                  }, window.location.origin);
                 }
               }, 250);
             }
@@ -398,7 +1509,7 @@ export default function App() {
                 lat: targetLat,
                 lng: targetLng,
                 tipo: payload.new.tipo
-              }, '*');
+              }, window.location.origin);
             }
           } else if (!isActiva) {
             // --- CASO 4: Alerta atendida / finalizada / falsa alarma ---
@@ -439,6 +1550,8 @@ export default function App() {
   // Escuchar eventos y clicks provenientes del iframe del mapa Leaflet
   useEffect(() => {
     const handleMapMessage = (event) => {
+      // Validación estricta de origen (SEC-04)
+      if (event.origin !== window.location.origin) return;
       if (!event.data) return;
 
       if (event.data.type === 'SELECT_ALERTA') {
@@ -475,12 +1588,12 @@ export default function App() {
             mapIframeRef.current.contentWindow.postMessage({
               type: 'SET_THEME',
               theme: mapTheme
-            }, '*');
+            }, window.location.origin);
             const activas = alertasRef.current.filter(a => a.estado === 'activa' && a.latitud && a.longitud);
             mapIframeRef.current.contentWindow.postMessage({
               type: 'UPDATE_ALERTS',
               alerts: activas
-            }, '*');
+            }, window.location.origin);
           } catch (e) {
             console.error("Error al sincronizar con mapa listo:", e);
           }
@@ -496,7 +1609,7 @@ export default function App() {
   useEffect(() => {
     if (dashboardTab === 'alertas' && mapIframeRef.current && mapIframeRef.current.contentWindow) {
       try {
-        mapIframeRef.current.contentWindow.postMessage({ type: 'INVALIDATE_SIZE' }, '*');
+        mapIframeRef.current.contentWindow.postMessage({ type: 'INVALIDATE_SIZE' }, window.location.origin);
       } catch (e) {
         console.error("Error al invalidar tamaño de mapa:", e);
       }
@@ -511,7 +1624,7 @@ export default function App() {
         mapIframeRef.current.contentWindow.postMessage({
           type: 'UPDATE_ALERTS',
           alerts: activas
-        }, '*');
+        }, window.location.origin);
       } catch (e) {
         console.error("Error al enviar alertas al mapa:", e);
       }
@@ -527,7 +1640,7 @@ export default function App() {
           id: selectedAlerta.id,
           lat: selectedAlerta.latitud,
           lng: selectedAlerta.longitud
-        }, '*');
+        }, window.location.origin);
       } catch (e) {
         console.error("Error al enfocar marcador en el mapa:", e);
       }
@@ -541,7 +1654,7 @@ export default function App() {
         mapIframeRef.current.contentWindow.postMessage({
           type: 'SET_THEME',
           theme: mapTheme
-        }, '*');
+        }, window.location.origin);
       } catch (e) {
         console.error("Error al sincronizar tema con el mapa:", e);
       }
@@ -550,7 +1663,11 @@ export default function App() {
 
   const fetchStats = async (profile = userProfile) => {
     try {
-      let alertsQuery = supabase.from('alertas').select('*', { count: 'exact', head: true }).eq('estado', 'activa');
+      let alertsQuery = supabase
+        .from('alertas')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', 'activa');
+
       let usersQuery = supabase.from('usuarios').select('*', { count: 'exact', head: true });
       let devicesQuery = supabase.from('dispositivos').select('*', { count: 'exact', head: true });
       let communitiesQuery = supabase.from('comunidades').select('*', { count: 'exact', head: true });
@@ -579,25 +1696,49 @@ export default function App() {
   };
 
   const fetchAlertas = async (profile = userProfile) => {
-    let query = supabase
-      .from('alertas')
-      .select('*, emisor:usuarios(nombre), comunidad:comunidades(nombre)');
-    
-    if (profile && profile.rol === 'admin' && profile.id_comunidad) {
-      query = query.eq('id_comunidad', profile.id_comunidad);
-    }
+    try {
+      // 1. Obtener TODAS las alertas activas (Garantía anti-ocultamiento: nunca se pierden por límite de 100)
+      // Ordenadas de la MÁS RECIENTE a la MÁS ANTIGUA
+      let activeQuery = supabase
+        .from('alertas')
+        .select('*, emisor:usuarios(nombre, telefono), comunidad:comunidades(nombre)')
+        .eq('estado', 'activa')
+        .order('created_at', { ascending: false });
 
-    const { data } = await query.order('created_at', { ascending: false });
-    if (data) {
-      setAlertas(data);
-      const activeIds = new Set();
-      const activas = data.filter(a => {
-        if (a.estado === 'activa') {
-          activeIds.add(a.id);
-          return true;
-        }
-        return false;
-      });
+      if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+        activeQuery = activeQuery.eq('id_comunidad', profile.id_comunidad);
+      }
+
+      // 2. Obtener historial de alertas atendidas/falsas alarmas (ordenadas de más reciente a más antigua)
+      let historyQuery = supabase
+        .from('alertas')
+        .select('*, emisor:usuarios(nombre, telefono), comunidad:comunidades(nombre)')
+        .neq('estado', 'activa')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+        historyQuery = historyQuery.eq('id_comunidad', profile.id_comunidad);
+      }
+
+      const [{ data: activeData, error: activeErr }, { data: historyData, error: historyErr }] = await Promise.all([
+        activeQuery,
+        historyQuery
+      ]);
+
+      if (activeErr) console.error("Error fetching active alertas:", activeErr);
+      if (historyErr) console.error("Error fetching history alertas:", historyErr);
+
+      const activas = activeData || [];
+      const historial = historyData || [];
+
+      // CERO auto-finalizaciones automáticas: Todo debe ser atendido manualmente por el administrador.
+      // Combinar listas: Alertas activas SIEMPRE al principio (de la más reciente a la más antigua),
+      // seguidas por el historial de alertas atendidas (también de más reciente a más antigua).
+      const combined = [...activas, ...historial];
+      setAlertas(combined);
+
+      const activeIds = new Set(activas.map(a => a.id));
       knownActiveAlertIds.current = activeIds;
 
       if (mapIframeRef.current && mapIframeRef.current.contentWindow) {
@@ -605,10 +1746,14 @@ export default function App() {
         mapIframeRef.current.contentWindow.postMessage({
           type: 'UPDATE_ALERTS',
           alerts: activasConCoords
-        }, '*');
+        }, window.location.origin);
       }
+
+      return combined;
+    } catch (err) {
+      console.error("Error in fetchAlertas:", err);
+      return [];
     }
-    return data;
   };
 
   const fetchUsuarios = async (profile = userProfile) => {
@@ -620,7 +1765,8 @@ export default function App() {
       query = query.eq('id_comunidad', profile.id_comunidad);
     }
 
-    const { data } = await query.order('created_at', { ascending: false });
+    // Límite de seguridad contra DoS (SEC-07)
+    const { data } = await query.order('created_at', { ascending: false }).limit(200);
     if (data) setUsuarios(data);
   };
 
@@ -644,7 +1790,8 @@ export default function App() {
       query = query.eq('id_comunidad', profile.id_comunidad);
     }
 
-    const { data } = await query.order('created_at', { ascending: false });
+    // Límite de seguridad contra DoS (SEC-07)
+    const { data } = await query.order('created_at', { ascending: false }).limit(200);
     if (data) setDispositivos(data);
   };
 
@@ -704,18 +1851,28 @@ export default function App() {
         return;
       }
 
-      // Success: Reset brute force tracker
+      // Success: Reset brute force tracker (SEC-06)
       setLoginAttempts(0);
       setLockUntil(null);
+      try {
+        localStorage.removeItem('eje_login_attempts');
+        localStorage.removeItem('eje_lock_until');
+      } catch (e) {}
       setUser(data.user);
       setCurrentPage('dashboard');
     } catch (err) {
       const newAttempts = loginAttempts + 1;
       setLoginAttempts(newAttempts);
+      try {
+        localStorage.setItem('eje_login_attempts', String(newAttempts));
+      } catch (e) {}
 
       if (newAttempts >= 3) {
         const lockTime = now + 5 * 60 * 1000; // 5 minutes lock
         setLockUntil(lockTime);
+        try {
+          localStorage.setItem('eje_lock_until', String(lockTime));
+        } catch (e) {}
         setLoginError('Demasiados intentos fallidos. Tu cuenta ha sido bloqueada por 5 minutos.');
       } else {
         setLoginError(`${err.message || 'Error al iniciar sesión'}. Intentos fallidos: ${newAttempts}/3`);
@@ -757,12 +1914,21 @@ export default function App() {
       setResetError('Formato de correo electrónico inválido.');
       return;
     }
+
+    // Cooldown anti-spam (SEC-08)
+    if (resetCooldown > 0) {
+      setResetError(`Por seguridad, debes esperar ${resetCooldown} segundo(s) antes de solicitar otro código.`);
+      return;
+    }
+
     setResetError('');
     setResetLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(mail);
       if (error) throw error;
       setResetStep(2);
+      setResetCooldown(60); // 60 segundos de cooldown anti-spam (SEC-08)
+      setOtpAttempts(0);
     } catch (err) {
       setResetError(err.message || 'Error al enviar código de recuperación.');
     } finally {
@@ -773,6 +1939,13 @@ export default function App() {
   const handleVerifyOtpAndResetPassword = async (e) => {
     e?.preventDefault();
     const code = resetOtpCode.trim();
+
+    // Límite de intentos OTP anti-fuerza bruta (SEC-08)
+    if (otpAttempts >= 5) {
+      setResetError('Demasiados intentos fallidos con el código de seguridad. Por favor, solicita un nuevo código.');
+      return;
+    }
+
     if (code.length < 8) {
       setResetError('El código debe tener 8 dígitos.');
       return;
@@ -810,12 +1983,15 @@ export default function App() {
       setResetSuccess('¡Contraseña restablecida con éxito! Ya puedes iniciar sesión con tu nueva contraseña.');
       setEmail(resetEmail.trim());
       setPassword('');
+      setOtpAttempts(0);
+      setResetCooldown(0);
     } catch (err) {
+      setOtpAttempts(prev => prev + 1);
       let msg = err.message || 'Error al restablecer la contraseña.';
       if (msg.includes('Token has expired') || msg.includes('expired')) {
         msg = 'El código ha expirado. Por favor, solicita uno nuevo.';
       } else if (msg.includes('invalid') || msg.includes('Token is invalid')) {
-        msg = 'Código de seguridad incorrecto. Revisa el correo recibido.';
+        msg = `Código de seguridad incorrecto. Intento ${otpAttempts + 1}/5. Revisa el correo recibido.`;
       } else if (msg.includes('same password')) {
         msg = 'La nueva contraseña debe ser diferente a la anterior.';
       }
@@ -828,13 +2004,20 @@ export default function App() {
   // Actualizar estado específico de la alerta
   const handleUpdateAlertStatus = async (id, nuevoEstado) => {
     setFormLoading(true);
-    const { error } = await supabase
+    let query = supabase
       .from('alertas')
       .update({ estado: nuevoEstado })
       .eq('id', id);
+
+    // Aislamiento por comunidad BOLA/IDOR (SEC-03)
+    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
+      query = query.eq('id_comunidad', userProfile.id_comunidad);
+    }
+
+    const { error } = await query;
     if (!error) {
-      fetchAlertas();
-      fetchStats();
+      await fetchAlertas(userProfile);
+      await fetchStats(userProfile);
       setManageAlerta(null);
     } else {
       alert("Error al actualizar el estado de la alerta: " + error.message);
@@ -877,6 +2060,10 @@ export default function App() {
     e.preventDefault();
     if (!editingComunidad) return;
     setComunidadFormMessage({ type: '', text: '' });
+    if (userProfile && userProfile.rol !== 'super_admin') {
+      setComunidadFormMessage({ type: 'error', text: "Solo el Super Administrador puede editar comunidades." });
+      return;
+    }
     setFormLoading(true);
     let payload = {
       nombre: editingComunidad.nombre.trim(),
@@ -902,6 +2089,10 @@ export default function App() {
 
   // Toggle Comunidad Estado (Borrado Lógico)
   const handleToggleComunidadEstado = async (comunidadId, estadoActual, comunidadNombre) => {
+    if (userProfile && userProfile.rol !== 'super_admin') {
+      setComunidadFormMessage({ type: 'error', text: "Solo el Super Administrador puede cambiar el estado de comunidades." });
+      return;
+    }
     const nuevoEstado = estadoActual === 'inactivo' ? 'activo' : 'inactivo';
     const accion = nuevoEstado === 'inactivo' ? 'desactivar (borrado lógico)' : 'reactivar';
     if (!window.confirm(`¿Estás seguro de que deseas ${accion} la comunidad "${comunidadNombre}"?`)) {
@@ -970,15 +2161,21 @@ export default function App() {
       return;
     }
 
-    // Determinar la comunidad asignada
+    // Determinar rol y comunidad asignada con validación de privilegios (SEC-02)
+    let rolAsignado = newUsuario.rol;
     let comunidadId = null;
+
     if (userProfile && userProfile.rol === 'admin') {
       comunidadId = userProfile.id_comunidad;
+      if (rolAsignado === 'super_admin') {
+        setUserFormMessage({ type: 'error', text: 'No tienes permisos para crear usuarios con rol Super Administrador' });
+        return;
+      }
     } else if (newUsuario.id_comunidad) {
       comunidadId = Number(newUsuario.id_comunidad);
     }
 
-    if (!comunidadId && newUsuario.rol !== 'super_admin') {
+    if (!comunidadId && rolAsignado !== 'super_admin') {
       setUserFormMessage({ type: 'error', text: 'Debes seleccionar o pertenecer a una comunidad' });
       return;
     }
@@ -1003,7 +2200,7 @@ export default function App() {
           data: {
             nombre: nombreTrim,
             direccion: direccionTrim,
-            rol: newUsuario.rol,
+            rol: rolAsignado,
             id_comunidad: comunidadId,
             telefono: telefonoCompleto
           }
@@ -1096,30 +2293,44 @@ export default function App() {
     }
 
     let comId = null;
+    let rolActualizado = editingUsuario.rol;
+
     if (userProfile && userProfile.rol === 'admin') {
       comId = userProfile.id_comunidad;
+      // Seguridad SEC-02: Un admin nunca puede auto-promover ni asignar el rol de super_admin
+      if (rolActualizado === 'super_admin') {
+        setUserFormMessage({ type: 'error', text: 'No tienes permisos para asignar el rol de Super Administrador.' });
+        return;
+      }
     } else if (editingUsuario.id_comunidad) {
       comId = Number(editingUsuario.id_comunidad);
     }
 
-    if (!comId && editingUsuario.rol !== 'super_admin') {
+    if (!comId && rolActualizado !== 'super_admin') {
       setUserFormMessage({ type: 'error', text: 'Debes seleccionar o pertenecer a una comunidad' });
       return;
     }
 
     setFormLoading(true);
     const telefonoCompleto = phoneNoTrim ? `${editingUsuario.countryCode}${phoneNoTrim}` : null;
-    const { error } = await supabase
+    let updateQuery = supabase
       .from('usuarios')
       .update({
         nombre: nombreTrim,
         direccion: direccionTrim,
-        rol: editingUsuario.rol,
+        rol: rolActualizado,
         id_comunidad: comId,
         estado: editingUsuario.estado,
         telefono: telefonoCompleto
       })
       .eq('id', editingUsuario.id);
+
+    // Aislamiento por comunidad BOLA/IDOR (SEC-03)
+    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
+      updateQuery = updateQuery.eq('id_comunidad', userProfile.id_comunidad);
+    }
+
+    const { error } = await updateQuery;
 
     if (!error) {
       setEditingUsuario(null);
@@ -1141,10 +2352,17 @@ export default function App() {
     }
     setFormLoading(true);
     setUserFormMessage({ type: '', text: '' });
-    const { error } = await supabase
+    let toggleQuery = supabase
       .from('usuarios')
       .update({ estado: nuevoEstado })
       .eq('id', usuarioId);
+
+    // Aislamiento por comunidad BOLA/IDOR (SEC-03)
+    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
+      toggleQuery = toggleQuery.eq('id_comunidad', userProfile.id_comunidad);
+    }
+
+    const { error } = await toggleQuery;
 
     if (!error) {
       setUserFormMessage({ 
@@ -1293,10 +2511,17 @@ export default function App() {
     }
 
     setFormLoading(true);
-    const { error } = await supabase
+    let updateDevQuery = supabase
       .from('dispositivos')
       .update(payload)
       .eq('mac_address', editingDispositivo.mac_address);
+
+    // Aislamiento por comunidad BOLA/IDOR (SEC-03)
+    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
+      updateDevQuery = updateDevQuery.eq('id_comunidad', userProfile.id_comunidad);
+    }
+
+    const { error } = await updateDevQuery;
 
     if (!error) {
       setEditingDispositivo(null);
@@ -1318,10 +2543,17 @@ export default function App() {
     }
     setFormLoading(true);
     setDeviceFormMessage({ type: '', text: '' });
-    const { error } = await supabase
+    let toggleDevQuery = supabase
       .from('dispositivos')
       .update({ estado: nuevoEstado })
       .eq('mac_address', macAddress);
+
+    // Aislamiento por comunidad BOLA/IDOR (SEC-03)
+    if (userProfile && userProfile.rol === 'admin' && userProfile.id_comunidad) {
+      toggleDevQuery = toggleDevQuery.eq('id_comunidad', userProfile.id_comunidad);
+    }
+
+    const { error } = await toggleDevQuery;
 
     if (!error) {
       setDeviceFormMessage({ 
@@ -2382,16 +3614,17 @@ export default function App() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <span className={`text-sm font-semibold ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Reportes</span>
+                  <span className={`text-sm font-semibold ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Reportes y Auditoría</span>
                   <BarChart3 className={`w-5 h-5 ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-purple-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
-                  <span>Métricas</span>
-                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30">
-                    Pronto
+                  <span>6 Informes</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Activo
                   </span>
                 </h3>
-                <p className="text-xs text-gray-400 mt-2">Exportación y auditoría vecinal</p>
+                <p className="text-xs text-gray-400 mt-2">Auditoría vecinal y descargas PDF</p>
                 {dashboardTab === 'reportes' && (
                   <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
@@ -2433,17 +3666,17 @@ export default function App() {
                         mapIframeRef.current.contentWindow.postMessage({
                           type: 'SET_THEME',
                           theme: mapTheme
-                        }, '*');
+                        }, window.location.origin);
                         const activas = alertas.filter(a => a.estado === 'activa' && a.latitud && a.longitud);
                         mapIframeRef.current.contentWindow.postMessage({
                           type: 'UPDATE_ALERTS',
                           alerts: activas
-                        }, '*');
+                        }, window.location.origin);
                       }
                     }}
                   />
-                  {stats.activeAlerts === 0 && (
-                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-10">
+                  {(stats.activeAlerts === 0 || alertas.filter(a => a.estado === 'activa').length === 0) && (
+                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-10 animate-fade-in">
                       <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4">
                         <CheckCircle className="w-6 h-6" />
                       </div>
@@ -2493,7 +3726,7 @@ export default function App() {
                                       id: alerta.id,
                                       lat: targetLat,
                                       lng: targetLng
-                                    }, '*');
+                                    }, window.location.origin);
                                   }
 
                                   const mapEl = document.getElementById('mapa-live-container');
@@ -3409,74 +4642,836 @@ export default function App() {
               </div>
             )}
 
-            {/* Tab content 5: Reportes (En desarrollo) */}
+            {/* Tab content 5: Centro de Reportes y Auditoría Vecinal */}
             {dashboardTab === 'reportes' && (
-              <div className="glassmorphism rounded-3xl p-8 md:p-14 border border-white/10 text-center relative overflow-hidden animate-fade-in shadow-2xl">
-                {/* Glow decorativo de fondo */}
-                <div className="absolute -top-24 -right-24 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
-                <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-[#00E5FF]/10 rounded-full blur-3xl pointer-events-none"></div>
+              <div className="space-y-8 animate-fade-in pb-12">
+                {/* Estilos dedicados para impresión oficial en tamaño Carta y Blanco y Negro */}
+                <style>{`
+                  @media print {
+                    @page {
+                      margin: 14mm 15mm;
+                      size: letter portrait;
+                    }
+                    html, body {
+                      background: #ffffff !important;
+                      color: #000000 !important;
+                      height: auto !important;
+                      overflow: visible !important;
+                      margin: 0 !important;
+                      padding: 0 !important;
+                    }
+                    .no-print {
+                      display: none !important;
+                    }
+                    .fixed.inset-0 {
+                      position: static !important;
+                      inset: auto !important;
+                      background: #ffffff !important;
+                      padding: 0 !important;
+                      overflow: visible !important;
+                      display: block !important;
+                      backdrop-filter: none !important;
+                    }
+                    .relative.w-full.max-w-4xl {
+                      max-width: 100% !important;
+                      max-height: none !important;
+                      border: none !important;
+                      box-shadow: none !important;
+                      background: #ffffff !important;
+                      overflow: visible !important;
+                      margin: 0 !important;
+                      padding: 0 !important;
+                    }
+                    #printable-report-area {
+                      position: static !important;
+                      width: 100% !important;
+                      max-width: 100% !important;
+                      margin: 0 !important;
+                      padding: 0 !important;
+                      background: #ffffff !important;
+                      color: #000000 !important;
+                      box-shadow: none !important;
+                      border: none !important;
+                      border-radius: 0 !important;
+                    }
+                    .print-break-inside-avoid, tr, .kpi-card, .signature-item {
+                      break-inside: avoid !important;
+                      page-break-inside: avoid !important;
+                    }
+                  }
+                `}</style>
 
-                <div className="relative z-10 max-w-2xl mx-auto">
-                  {/* Icono central con aura */}
-                  <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-purple-600/30 to-[#00E5FF]/30 border border-purple-500/40 flex items-center justify-center mx-auto mb-6 shadow-xl shadow-purple-500/20">
-                    <BarChart3 className="w-10 h-10 text-[#00E5FF]" />
-                  </div>
+                {/* Encabezado Principal del Módulo */}
+                <div className="glassmorphism rounded-3xl p-6 md:p-8 border border-white/10 relative overflow-hidden shadow-2xl">
+                  <div className="absolute -top-24 -right-24 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                  <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-[#00E5FF]/10 rounded-full blur-3xl pointer-events-none"></div>
 
-                  {/* Badge de estado */}
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold uppercase tracking-wider mb-5">
-                    <Clock className="w-3.5 h-3.5" />
-                    Módulo en Desarrollo
-                  </div>
-
-                  <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight mb-4">
-                    Centro de Reportes y Auditoría
-                  </h2>
-
-                  <p className="text-gray-400 text-sm md:text-base leading-relaxed mb-8">
-                    Esta sección se encuentra actualmente <strong className="text-white">en desarrollo</strong>. Muy pronto podrás generar y exportar informes ejecutivos, estadísticas históricas de emergencias y métricas de seguridad vecinal.
-                  </p>
-
-                  {/* Tarjetas de avance / próximas funciones */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left mb-8">
-                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
-                      <div className="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 mb-3">
-                        <FileText className="w-4 h-4" />
+                  <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-600/30 to-[#00E5FF]/30 border border-purple-500/40 flex items-center justify-center shadow-lg shadow-purple-500/20 shrink-0">
+                        <BarChart3 className="w-8 h-8 text-[#00E5FF]" />
                       </div>
-                      <h4 className="text-sm font-bold text-white mb-1">Reportes en PDF</h4>
-                      <p className="text-xs text-gray-400">Informes formales listos para asambleas vecinales.</p>
-                      <span className="inline-block mt-3 text-[10px] font-semibold text-purple-400/80 bg-purple-500/10 px-2 py-0.5 rounded-md">
-                        En construcción
-                      </span>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            Módulo Oficial Operativo
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-bold">
+                            6 Informes Disponibles
+                          </span>
+                        </div>
+                        <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
+                          Centro de Reportes y Auditoría Vecinal
+                        </h2>
+                        <p className="text-gray-400 text-xs md:text-sm mt-1">
+                          Generación y descarga individual de informes ejecutivos, métricas estadísticas y padrón vecinal listos para imprimir y asambleas.
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
-                      <div className="w-8 h-8 rounded-xl bg-sky-500/10 flex items-center justify-center text-[#00E5FF] mb-3">
-                        <BarChart3 className="w-4 h-4" />
-                      </div>
-                      <h4 className="text-sm font-bold text-white mb-1">Hojas de Cálculo</h4>
-                      <p className="text-xs text-gray-400">Exportación completa de datos en formato Excel y CSV.</p>
-                      <span className="inline-block mt-3 text-[10px] font-semibold text-[#00E5FF]/80 bg-[#00E5FF]/10 px-2 py-0.5 rounded-md">
-                        En construcción
-                      </span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <button
+                        onClick={() => setActiveReportPreview('bitacora')}
+                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-500/25 flex items-center gap-2"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>Vista Rápida PDF</span>
+                      </button>
                     </div>
-
-                    <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 backdrop-blur-sm">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400 mb-3">
-                        <Activity className="w-4 h-4" />
-                      </div>
-                      <h4 className="text-sm font-bold text-white mb-1">Tiempos de Respuesta</h4>
-                      <p className="text-xs text-gray-400">Métricas de velocidad y efectividad de atención.</p>
-                      <span className="inline-block mt-3 text-[10px] font-semibold text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-md">
-                        En construcción
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900/80 border border-white/10 text-gray-400 text-xs">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Disponible próximamente en la plataforma Eje Urbano</span>
                   </div>
                 </div>
+
+                {/* Barra de Filtros Inteligentes y Segmentación por Rol */}
+                <div className="glassmorphism rounded-2xl p-5 border border-white/10 space-y-4 shadow-xl">
+                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                    <div className="flex items-center gap-2 text-white font-bold text-sm">
+                      <Filter className="w-4 h-4 text-[#00E5FF]" />
+                      <span>Filtros y Segmentación Institucional</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setReportDateRange('30d');
+                        setReportStartDate('');
+                        setReportEndDate('');
+                        setReportTypeFilter('todos');
+                        setReportStatusFilter('todos');
+                        setReportSearchTerm('');
+                        if (userProfile?.rol === 'super_admin') {
+                          setReportCommunityId('todas');
+                        }
+                      }}
+                      className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Restablecer Filtros</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* Filtro 1: Comunidad (Segmentación Estricta por Rol) */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <Home className="w-3.5 h-3.5 text-[#00E5FF]" />
+                        <span>Comunidad / Jurisdicción</span>
+                      </label>
+                      {userProfile?.rol === 'admin' ? (
+                        <div className="p-2.5 rounded-xl bg-slate-900/90 border border-purple-500/30 flex items-center gap-2">
+                          <Lock className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                          <div className="truncate">
+                            <span className="text-xs font-bold text-white block truncate">
+                              {userProfile?.nombre_comunidad || 'Comunidad Asignada'}
+                            </span>
+                            <span className="text-[10px] text-purple-300 font-semibold block">
+                              Administrador Local (Fijo)
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <select
+                          value={reportCommunityId}
+                          onChange={(e) => setReportCommunityId(e.target.value)}
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                        >
+                          <option value="todas">Todas las Comunidades (Consolidado)</option>
+                          {comunidades.map(c => (
+                            <option key={c.id} value={c.id}>{c.nombre}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* Filtro 2: Período de Tiempo */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Período Auditado</span>
+                      </label>
+                      <select
+                        value={reportDateRange}
+                        onChange={(e) => setReportDateRange(e.target.value)}
+                        className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                      >
+                        <option value="7d">Últimos 7 Días</option>
+                        <option value="30d">Últimos 30 Días</option>
+                        <option value="90d">Últimos 90 Días</option>
+                        <option value="anio">Año en Curso ({new Date().getFullYear()})</option>
+                        <option value="todo">Histórico Completo</option>
+                        <option value="personalizado">Rango Personalizado...</option>
+                      </select>
+                    </div>
+
+                    {/* Filtro 3: Tipo de Emergencia (Excluye IoT y Acompáñame) */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Tipo de Emergencia</span>
+                      </label>
+                      <select
+                        value={reportTypeFilter}
+                        onChange={(e) => setReportTypeFilter(e.target.value)}
+                        className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                      >
+                        <option value="todos">Todas las Emergencias</option>
+                        <option value="ROBO">Robo / Intrusión</option>
+                        <option value="SOS">SOS / Pánico Vecinal</option>
+                        <option value="MEDICA">Emergencia Médica</option>
+                        <option value="INCENDIO">Incendio</option>
+                        <option value="DESASTRE">Desastre Natural</option>
+                      </select>
+                    </div>
+
+                    {/* Filtro 4: Estado de la Alerta */}
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Estado de Resolución</span>
+                      </label>
+                      <select
+                        value={reportStatusFilter}
+                        onChange={(e) => setReportStatusFilter(e.target.value)}
+                        className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                      >
+                        <option value="todos">Todos los Estados</option>
+                        <option value="activa">En Curso (Activas)</option>
+                        <option value="finalizada">Atendidas / Finalizadas</option>
+                        <option value="falsa_alarma">Falsa Alarma</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Campos adicionales si es rango personalizado y buscador */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-white/5">
+                    {reportDateRange === 'personalizado' && (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-400 mb-1">Fecha Desde:</label>
+                          <input
+                            type="date"
+                            value={reportStartDate}
+                            onChange={(e) => setReportStartDate(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-400 mb-1">Fecha Hasta:</label>
+                          <input
+                            type="date"
+                            value={reportEndDate}
+                            onChange={(e) => setReportEndDate(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00E5FF]"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    <div className={reportDateRange === 'personalizado' ? 'sm:col-span-1' : 'sm:col-span-3'}>
+                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">Buscar por vecino, ID o dirección:</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={reportSearchTerm}
+                          onChange={(e) => setReportSearchTerm(e.target.value)}
+                          placeholder="Ej. Juan Pérez, ID 15, Los Olivos..."
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#00E5FF]"
+                        />
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                        {reportSearchTerm && (
+                          <button
+                            onClick={() => setReportSearchTerm('')}
+                            className="absolute right-3 top-2.5 text-gray-400 hover:text-white"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4 Tarjetas de Métricas Rápidas (KPIs) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="glassmorphism rounded-2xl p-5 border border-white/5 relative overflow-hidden">
+                    <div className="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
+                      <span>Emergencias Auditadas</span>
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <div className="text-3xl font-extrabold text-white">
+                      {reportCalculatedStats.total}
+                    </div>
+                    <div className="mt-2 text-[11px] text-gray-400 flex items-center justify-between">
+                      <span>{reportDateRangeLabel}</span>
+                      <span className="text-rose-400 font-bold">{reportCalculatedStats.activas} activas</span>
+                    </div>
+                  </div>
+
+                  <div className="glassmorphism rounded-2xl p-5 border border-white/5 relative overflow-hidden">
+                    <div className="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
+                      <span>Tasa de Resolución</span>
+                      <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div className="text-3xl font-extrabold text-white">
+                      {reportCalculatedStats.tasaResolucion}%
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
+                      <div
+                        className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
+                        style={{ width: `${reportCalculatedStats.tasaResolucion}%` }}
+                      ></div>
+                    </div>
+                    <div className="mt-1.5 text-[11px] text-gray-400 flex justify-between">
+                      <span>{reportCalculatedStats.atendidas} atendidas</span>
+                      <span className="text-emerald-400 font-bold">Alta Efectividad</span>
+                    </div>
+                  </div>
+
+                  <div className="glassmorphism rounded-2xl p-5 border border-white/5 relative overflow-hidden">
+                    <div className="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
+                      <span>Tipo Predominante</span>
+                      <TrendingUp className="w-4 h-4 text-[#00E5FF]" />
+                    </div>
+                    <div className="text-3xl font-extrabold text-[#00E5FF] truncate">
+                      {reportCalculatedStats.tipoPredominante}
+                    </div>
+                    <div className="mt-2 text-[11px] text-gray-400 flex items-center justify-between">
+                      <span>Franja Crítica:</span>
+                      <span className="text-amber-400 font-bold truncate max-w-[130px]">
+                        {reportCalculatedStats.franjaCritica.split(' ')[0]}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="glassmorphism rounded-2xl p-5 border border-white/5 relative overflow-hidden">
+                    <div className="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
+                      <span>Padrón Comunitario</span>
+                      <Users className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div className="text-3xl font-extrabold text-white">
+                      {reportCalculatedStats.totalVecinos}
+                    </div>
+                    <div className="mt-2 text-[11px] text-gray-400 flex items-center justify-between">
+                      <span>Vecinos Registrados</span>
+                      <span className="text-purple-300 font-bold">100% Cobertura</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Catálogo de los 6 Informes Vecinales Oficiales con Descarga Individual */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-[#00E5FF]" />
+                      <span>Catálogo de Informes y Actas Descargables</span>
+                    </h3>
+                    <span className="text-xs text-gray-400">
+                      Cada informe genera su propio documento PDF formal e independiente
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {/* Tarjeta 1: Bitácora de Alertas e Incidencias */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-cyan-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-[#00E5FF]">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 text-[10px] font-bold">
+                            Informe 1
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-[#00E5FF] transition-colors">
+                          Bitácora de Alertas e Incidencias
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Registro cronológico de emergencias con nombre del vecino emisor, teléfono, hora exacta, tipo de alerta, coordenadas iniciales y estado.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+                          <span>{filteredReportAlertas.length} registros listos</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('bitacora')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-[#00E5FF]/20 hover:bg-[#00E5FF]/30 border border-[#00E5FF]/40 text-[#00E5FF] text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('bitacora')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span className="hidden sm:inline text-[11px]">PDF Carta</span>
+                        </button>
+                        <button
+                          onClick={handleExportBitacoraCSV}
+                          title="Exportar a Hoja de Cálculo Excel (CSV)"
+                          className="py-2 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-gray-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>CSV</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 2: Estadísticas y Métricas de Emergencias */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-purple-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                            <BarChart3 className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 text-[10px] font-bold">
+                            Informe 2
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-purple-400 transition-colors">
+                          Estadísticas y Métricas de Emergencias
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Cuantificación analítica de eventos, tasa de resolución vecinal, porcentajes por tipo de siniestro y diagnóstico de efectividad.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                          <span>Tasa de resolución: {reportCalculatedStats.tasaResolucion}%</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('estadisticas')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/40 text-purple-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('estadisticas')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span>PDF Carta</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 3: Análisis de Horas Pico y Días Críticos */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-amber-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                            <Clock className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 text-[10px] font-bold">
+                            Informe 3
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-amber-400 transition-colors">
+                          Análisis de Horas Pico y Días Críticos
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Desglose por franjas horarias (Madrugada, Mañana, Tarde, Noche) y días de la semana para organizar rondas preventivas y vigilancia.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                          <span>Día crítico: {reportCalculatedStats.diaCritico}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('horaspico')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('horaspico')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span>PDF Carta</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 4: Padrón Vecinal y Cobertura Comunitaria */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-emerald-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                            <Users className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-bold">
+                            Informe 4
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-emerald-400 transition-colors">
+                          Padrón Vecinal y Cobertura
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Censo formal de vecinos registrados en la comunidad, teléfonos de emergencia, direcciones domiciliarias y fecha de alta.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                          <span>{filteredReportUsuarios.length} vecinos censados</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('padron')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('padron')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span className="hidden sm:inline text-[11px]">PDF Carta</span>
+                        </button>
+                        <button
+                          onClick={handleExportPadronCSV}
+                          title="Exportar a Hoja de Cálculo Excel (CSV)"
+                          className="py-2 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-gray-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>CSV</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 5: Seguimiento de Vecinos Recurrentes */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-rose-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                            <AlertTriangle className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 text-[10px] font-bold">
+                            Informe 5
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-rose-400 transition-colors">
+                          Seguimiento de Vecinos Recurrentes
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Identificación de vecinos con 2 o más activaciones en el período para auditar puntos vulnerables y brindar asistencia comunitaria focalizada.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+                          <span>{reportRecurrentes.length} casos con 2+ activaciones</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('recurrentes')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('recurrentes')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span>PDF Carta</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Tarjeta 6: Acta Ejecutiva para Asambleas Vecinales */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-indigo-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                            <ShieldCheck className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 text-[10px] font-bold">
+                            Informe 6
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-indigo-400 transition-colors">
+                          Acta Oficial para Asambleas Vecinales
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Documento formal con membrete institucional, balance del período, síntesis de compromisos y espacios para firmas de las autoridades barriales.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-indigo-400"></span>
+                          <span>Formato listo para firma y archivo</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('acta')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-indigo-600/30 to-purple-600/30 hover:from-indigo-600/40 hover:to-purple-600/40 border border-indigo-500/50 text-indigo-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('acta')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span>PDF Carta</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla Interactiva de la Bitácora Filtrada en Pantalla */}
+                <div className="glassmorphism rounded-2xl p-6 border border-white/10 shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-[#00E5FF]" />
+                        <span>Vista Previa de Emergencias Filtradas</span>
+                      </h3>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Mostrando <strong className="text-white">{filteredReportAlertas.length}</strong> incidentes para la comunidad <strong className="text-[#00E5FF]">{activeReportCommunityName}</strong> ({reportDateRangeLabel})
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleExportBitacoraCSV}
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-gray-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Exportar CSV</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveReportPreview('bitacora')}
+                        className="px-3 py-1.5 rounded-xl bg-[#00E5FF]/20 hover:bg-[#00E5FF]/30 border border-[#00E5FF]/40 text-[#00E5FF] text-xs font-bold flex items-center gap-1.5 transition-all shadow-md"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Imprimir / PDF</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm text-gray-300">
+                      <thead className="text-xs uppercase bg-slate-900/80 text-gray-400 border-b border-white/5">
+                        <tr>
+                          <th className="px-4 py-3">ID</th>
+                          <th className="px-4 py-3">Vecino Emisor</th>
+                          <th className="px-4 py-3">Teléfono</th>
+                          <th className="px-4 py-3">Tipo Alerta</th>
+                          <th className="px-4 py-3">Estado</th>
+                          <th className="px-4 py-3">Comunidad</th>
+                          <th className="px-4 py-3">Fecha y Hora</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {filteredReportAlertas.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="px-4 py-10 text-center text-gray-500">
+                              <AlertTriangle className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+                              <p className="text-sm font-semibold">No se encontraron alertas en este período</p>
+                              <p className="text-xs text-gray-600 mt-1">Prueba cambiando el rango de fechas o los filtros superiores.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredReportAlertas.slice(0, 15).map(alerta => (
+                            <tr key={alerta.id} className="hover:bg-slate-900/40 transition-colors">
+                              <td className="px-4 py-3 font-mono text-xs text-gray-400">#{alerta.id}</td>
+                              <td className="px-4 py-3 font-semibold text-white">
+                                {alerta.emisor?.nombre || 'Vecino Registrado'}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-400">
+                                {alerta.emisor?.telefono || 'No registrado'}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${
+                                  alerta.tipo === 'ROBO' || alerta.tipo === 'SOS'
+                                    ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                    : alerta.tipo === 'MEDICA' || alerta.tipo === 'MÉDICA'
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                    : alerta.tipo === 'INCENDIO'
+                                    ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                }`}>
+                                  {alerta.tipo}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                  alerta.estado === 'activa'
+                                    ? 'bg-red-600 text-white shadow-sm'
+                                    : alerta.estado === 'falsa_alarma'
+                                    ? 'bg-gray-700 text-gray-300'
+                                    : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                }`}>
+                                  {alerta.estado === 'activa' ? 'En Curso' : alerta.estado === 'falsa_alarma' ? 'Falsa Alarma' : 'Atendida'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-300">
+                                {alerta.comunidad?.nombre || activeReportCommunityName}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-400">
+                                {alerta.created_at ? new Date(alerta.created_at).toLocaleString() : 'N/A'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {filteredReportAlertas.length > 15 && (
+                    <div className="text-center pt-2 border-t border-white/5">
+                      <p className="text-xs text-gray-500">
+                        Mostrando las primeras 15 de {filteredReportAlertas.length} alertas. Descarga el PDF o CSV para ver la lista completa.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* MODAL DE VISTA PREVIA Y DESCARGA FORMAL DE PDF */}
+                {activeReportPreview && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md animate-fade-in overflow-y-auto">
+                    <div className="relative w-full max-w-6xl h-[92vh] flex flex-col bg-slate-950 border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden my-auto">
+                      
+                      {/* Barra de Controles del Modal (Oculta en Impresión) */}
+                      <div className="no-print p-3 sm:p-4 bg-slate-950 border-b border-white/10 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                            <Printer className="w-5 h-5 text-blue-400" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                              Vista Previa Oficial del Documento
+                              <span className="text-[10px] bg-slate-800 text-slate-300 font-semibold px-2 py-0.5 rounded-full border border-slate-700 hidden sm:inline-block">
+                                Tamaño Carta (B/N)
+                              </span>
+                            </h4>
+                            <p className="text-[11px] text-gray-400">
+                              Vista 100% idéntica al PDF oficial generado — Listo para imprimir o guardar
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Tabs de Selección Rápida en el Modal */}
+                        <div className="flex items-center overflow-x-auto max-w-full bg-slate-900/90 rounded-xl p-1 border border-white/10 text-xs gap-1">
+                          <button
+                            onClick={() => setActiveReportPreview('bitacora')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'bitacora' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Bitácora
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('estadisticas')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'estadisticas' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Estadísticas
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('horaspico')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'horaspico' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Horas Pico
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('padron')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'padron' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Padrón
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('recurrentes')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'recurrentes' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Recurrentes
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('acta')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'acta' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Acta Asamblea
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handlePrintReport(activeReportPreview)}
+                            className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-950 font-extrabold text-xs transition-all shadow-lg flex items-center gap-2 border border-white"
+                          >
+                            <Printer className="w-4 h-4 text-slate-950" />
+                            <span>Guardar como PDF / Imprimir</span>
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview(null)}
+                            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-gray-400 hover:text-white transition-colors"
+                            title="Cerrar vista previa"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* VISOR DOCUMENTAL 100% IDÉNTICO AL PDF GENERADO */}
+                      <div className="flex-1 overflow-hidden p-2 sm:p-4 bg-slate-900/90 flex justify-center items-center">
+                        <div className="w-full max-w-5xl h-full bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 flex flex-col">
+                          <iframe
+                            key={activeReportPreview}
+                            title="Vista Previa Oficial PDF"
+                            srcDoc={previewReportHTML}
+                            className="w-full h-full border-0 bg-white"
+                          />
+                        </div>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
           </section>
