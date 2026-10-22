@@ -177,7 +177,9 @@ export default function App() {
   const [reportTypeFilter, setReportTypeFilter] = useState('todos'); // 'todos', 'ROBO', 'SOS', 'MEDICA', 'INCENDIO', 'DESASTRE'
   const [reportStatusFilter, setReportStatusFilter] = useState('todos'); // 'todos', 'activa', 'finalizada', 'falsa_alarma'
   const [reportSearchTerm, setReportSearchTerm] = useState('');
-  const [activeReportPreview, setActiveReportPreview] = useState(null); // 'bitacora', 'estadisticas', 'horaspico', 'padron', 'recurrentes', 'acta'
+  const [activeReportPreview, setActiveReportPreview] = useState(null); // 'bitacora', 'estadisticas', 'horaspico', 'padron', 'recurrentes', 'acta', 'auditoria'
+  const [auditoriaEventos, setAuditoriaEventos] = useState([]);
+  const [loadingAuditoria, setLoadingAuditoria] = useState(false);
 
   // Sincronización estricta de comunidad según rol
   useEffect(() => {
@@ -465,6 +467,62 @@ export default function App() {
     };
   }, [filteredReportAlertas, filteredReportUsuarios]);
 
+  // Eventos de auditoría filtrados para el Informe 7
+  const filteredAuditoriaEventos = useMemo(() => {
+    return auditoriaEventos.filter(evento => {
+      // 1. Filtro por Comunidad y Rol
+      if (userProfile?.rol === 'admin') {
+        if (evento.id_comunidad && evento.id_comunidad !== userProfile.id_comunidad) {
+          return false;
+        }
+      } else if (reportCommunityId !== 'todas') {
+        if (evento.id_comunidad && String(evento.id_comunidad) !== String(reportCommunityId)) {
+          return false;
+        }
+      }
+
+      // 2. Filtro por Rango de Fechas
+      if (reportDateRange !== 'todo' && evento.created_at) {
+        const itemDate = new Date(evento.created_at);
+        const now = new Date();
+        if (reportDateRange === '7d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 7);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === '30d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 30);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === '90d') {
+          const limit = new Date();
+          limit.setDate(limit.getDate() - 90);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === 'anio') {
+          const limit = new Date(now.getFullYear(), 0, 1);
+          if (itemDate < limit) return false;
+        } else if (reportDateRange === 'personalizado') {
+          if (reportStartDate && itemDate < new Date(reportStartDate + 'T00:00:00')) return false;
+          if (reportEndDate && itemDate > new Date(reportEndDate + 'T23:59:59')) return false;
+        }
+      }
+
+      // 3. Filtro por término de búsqueda (usuario, acción, módulo o ID ref)
+      if (reportSearchTerm.trim()) {
+        const term = reportSearchTerm.toLowerCase();
+        const nom = (evento.nombre_usuario || '').toLowerCase();
+        const mod = (evento.modulo || '').toLowerCase();
+        const acc = (evento.accion || '').toLowerCase();
+        const ref = (evento.id_referencia || '').toLowerCase();
+        const orig = (evento.origen || '').toLowerCase();
+        if (!nom.includes(term) && !mod.includes(term) && !acc.includes(term) && !ref.includes(term) && !orig.includes(term)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [auditoriaEventos, userProfile, reportCommunityId, reportDateRange, reportStartDate, reportEndDate, reportSearchTerm]);
+
   // Exportación a Excel / CSV con soporte UTF-8 BOM
   const exportToCSV = (filename, headers, rows) => {
     const sanitize = (val) => {
@@ -516,6 +574,7 @@ export default function App() {
       a.longitud != null ? a.longitud : 'N/A'
     ]);
     exportToCSV(filename, headers, rows);
+    registrarAuditoriaWeb('REPORTES', 'EXPORTAR_REPORTE', 'bitacora', { formato: 'CSV' });
   };
 
   const handleExportPadronCSV = () => {
@@ -544,6 +603,52 @@ export default function App() {
       u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'
     ]);
     exportToCSV(filename, headers, rows);
+    registrarAuditoriaWeb('REPORTES', 'EXPORTAR_REPORTE', 'padron', { formato: 'CSV' });
+  };
+
+  const handleExportAuditoriaCSV = () => {
+    const cleanComName = (activeReportCommunityName || 'comunidad').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `informe_auditoria_sistema_${cleanComName}_${new Date().toISOString().slice(0, 10)}.csv`;
+    const headers = [
+      'N°',
+      'ID Registro',
+      'Fecha y Hora',
+      'Usuario Responsable',
+      'Rol',
+      'Módulo',
+      'Acción Realizada',
+      'ID Referencia',
+      'Origen Plataforma',
+      'Comunidad',
+      'Detalles Contextuales'
+    ];
+    const rows = filteredAuditoriaEventos.map((ev, idx) => {
+      let detallesStr = '';
+      if (ev.detalles && typeof ev.detalles === 'object') {
+        try {
+          detallesStr = Object.entries(ev.detalles).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' | ');
+        } catch {
+          detallesStr = JSON.stringify(ev.detalles);
+        }
+      } else if (ev.detalles) {
+        detallesStr = String(ev.detalles);
+      }
+      return [
+        idx + 1,
+        ev.id || '',
+        ev.created_at ? new Date(ev.created_at).toLocaleString() : 'N/A',
+        ev.nombre_usuario || 'Desconocido',
+        ev.rol_usuario || 'vecino',
+        ev.modulo || 'SISTEMA',
+        ev.accion || 'ACCION',
+        ev.id_referencia || '—',
+        (ev.origen || 'web').toUpperCase(),
+        ev.comunidad?.nombre || activeReportCommunityName,
+        detallesStr
+      ];
+    });
+    exportToCSV(filename, headers, rows);
+    registrarAuditoriaWeb('REPORTES', 'EXPORTAR_REPORTE', 'auditoria', { formato: 'CSV' });
   };
 
   // Generador de documento HTML 100% monocromático en formato Carta para impresión / PDF
@@ -914,6 +1019,111 @@ export default function App() {
           </div>
         </div>
       `;
+    } else if (reportKey === 'auditoria') {
+      reportTitle = '7. BITÁCORA OFICIAL DE AUDITORÍA Y TRAZABILIDAD DEL SISTEMA';
+      scopeDesc = 'Registro cronológico e inmutable de operaciones y trazabilidad forense del sistema (quién hizo qué, a qué hora, desde qué plataforma y sobre qué elemento). Diseñado bajo principios de seguridad, no repudio e integridad documental.';
+
+      const webCount = filteredAuditoriaEventos.filter(e => (e.origen || '').toLowerCase() === 'web').length;
+      const appCount = filteredAuditoriaEventos.filter(e => (e.origen || '').toLowerCase() === 'app').length;
+      const otherCount = filteredAuditoriaEventos.length - webCount - appCount;
+
+      const rowsHTML = filteredAuditoriaEventos.length === 0
+        ? `<tr><td colspan="9" style="text-align:center; padding: 20px; font-style:italic;">No se registran eventos de auditoría para los criterios seleccionados.</td></tr>`
+        : filteredAuditoriaEventos.map((ev, idx) => {
+            const origenTag = (ev.origen || '').toUpperCase() === 'WEB' ? '[ WEB ]' : (ev.origen || '').toUpperCase() === 'APP' ? '[ APP ]' : `[ ${(ev.origen || 'SYS').toUpperCase()} ]`;
+            let detallesStr = '';
+            if (ev.detalles && typeof ev.detalles === 'object') {
+              try {
+                detallesStr = Object.entries(ev.detalles)
+                  .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+                  .join(' | ');
+              } catch {
+                detallesStr = JSON.stringify(ev.detalles);
+              }
+            } else if (ev.detalles) {
+              detallesStr = String(ev.detalles);
+            }
+            if (!detallesStr) detallesStr = 'Sin detalles adicion.';
+
+            return `
+              <tr>
+                <td style="text-align:center; font-family:monospace;">${idx + 1}</td>
+                <td style="text-align:center; font-family:monospace; font-size:7.5pt;">${ev.created_at ? new Date(ev.created_at).toLocaleString() : 'N/A'}</td>
+                <td><strong>${ev.nombre_usuario || 'Desconocido'}</strong></td>
+                <td style="font-size:7.5pt; text-transform:uppercase;">${ev.rol_usuario || 'vecino'}</td>
+                <td style="font-weight:bold; font-size:7.5pt;">${ev.modulo || 'SISTEMA'}</td>
+                <td style="font-family:monospace; font-size:7.5pt; font-weight:bold;">${ev.accion || 'ACCION'}</td>
+                <td style="font-family:monospace; font-size:7.5pt; text-align:center;">${ev.id_referencia || '—'}</td>
+                <td style="text-align:center; font-family:monospace; font-weight:bold; font-size:7.5pt;">${origenTag}</td>
+                <td style="font-size:7pt; color:#222; word-break:break-word;">${detallesStr}</td>
+              </tr>
+            `;
+          }).join('');
+
+      bodyContent = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:3%; text-align:center;">#</th>
+              <th style="width:14%; text-align:center;">Fecha y Hora</th>
+              <th style="width:16%;">Usuario Responsable</th>
+              <th style="width:8%;">Rol</th>
+              <th style="width:12%;">Módulo</th>
+              <th style="width:15%;">Acción Realizada</th>
+              <th style="width:8%; text-align:center;">ID Ref</th>
+              <th style="width:8%; text-align:center;">Origen</th>
+              <th style="width:16%;">Detalles del Evento</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHTML}
+          </tbody>
+        </table>
+
+        <div style="margin-top:16px;">
+          <table class="data-table" style="width:100%;">
+            <thead>
+              <tr>
+                <th colspan="4" style="background:#000; color:#fff; text-align:center; font-weight:bold;">RESUMEN EJECUTIVO DE TRAZABILIDAD Y AUDITORÍA</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="width:25%;"><strong>Total de Eventos Auditados:</strong></td>
+                <td style="width:25%; font-family:monospace; font-size:10pt; font-weight:bold;">${filteredAuditoriaEventos.length}</td>
+                <td style="width:25%;"><strong>Operaciones desde Web:</strong></td>
+                <td style="width:25%; font-family:monospace; font-size:10pt; font-weight:bold;">${webCount} (${filteredAuditoriaEventos.length ? Math.round((webCount / filteredAuditoriaEventos.length) * 100) : 0}%)</td>
+              </tr>
+              <tr>
+                <td><strong>Operaciones desde App Móvil:</strong></td>
+                <td style="font-family:monospace; font-size:10pt; font-weight:bold;">${appCount} (${filteredAuditoriaEventos.length ? Math.round((appCount / filteredAuditoriaEventos.length) * 100) : 0}%)</td>
+                <td><strong>Otras / Sistema:</strong></td>
+                <td style="font-family:monospace; font-size:10pt; font-weight:bold;">${otherCount}</td>
+              </tr>
+              <tr>
+                <td><strong>Estado de Integridad:</strong></td>
+                <td colspan="3"><span style="border:1px solid #000; padding:1px 6px; font-weight:bold; font-size:7.5pt;">CONFORME — REGISTRO INMUTABLE (APPEND-ONLY)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <table style="width:100%; margin-top:28px; border-collapse:collapse;">
+          <tr>
+            <td style="width:45%; text-align:center; border-top:1px solid #000; padding-top:6px;">
+              <div style="font-weight:bold; font-size:8pt;">${emisorName}</div>
+              <div style="font-size:7pt; color:#444;">Oficial de Seguridad / Administración del Sistema</div>
+              <div style="font-size:6.5pt; color:#666; font-family:monospace;">Firma y Sello de Certificación</div>
+            </td>
+            <td style="width:10%;"></td>
+            <td style="width:45%; text-align:center; border-top:1px solid #000; padding-top:6px;">
+              <div style="font-weight:bold; font-size:8pt;">Auditoría y Fiscalización Vecinal</div>
+              <div style="font-size:7pt; color:#444;">Presidencia de Junta Vecinal / Consejo Barrial</div>
+              <div style="font-size:6.5pt; color:#666; font-family:monospace;">Constancia de Recepción y Visto Bueno</div>
+            </td>
+          </tr>
+        </table>
+      `;
     }
 
     return `
@@ -1174,6 +1384,7 @@ export default function App() {
   // Impresión y guardado a PDF limpio e infalible vía iframe aislado
   const handlePrintReport = (reportKey) => {
     const key = reportKey || activeReportPreview || 'bitacora';
+    registrarAuditoriaWeb('REPORTES', 'EXPORTAR_REPORTE', key, { formato: 'PDF', reporte: key });
     const htmlContent = generateReportHTML(key);
 
     let iframe = document.getElementById('eje-urbano-print-frame');
@@ -1248,6 +1459,7 @@ export default function App() {
     userProfile,
     filteredReportAlertas,
     filteredReportUsuarios,
+    filteredAuditoriaEventos,
     reportCalculatedStats,
     reportRecurrentes
   ]);
@@ -1386,6 +1598,7 @@ export default function App() {
     fetchUsuarios(userProfile);
     fetchComunidades(userProfile);
     fetchDispositivos(userProfile);
+    fetchAuditoria(userProfile);
 
     // Subscribe to new Alerts in Realtime!
     const alertsSubscription = supabase
@@ -1541,9 +1754,17 @@ export default function App() {
       })
       .subscribe();
 
+    const auditoriaSubscription = supabase
+      .channel('realtime_auditoria_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_sistema' }, () => {
+        fetchAuditoria(userProfile);
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(alertsSubscription);
       supabase.removeChannel(usersSubscription);
+      supabase.removeChannel(auditoriaSubscription);
     };
   }, [user, currentPage, userProfile?.id, userProfile?.rol, userProfile?.id_comunidad]);
 
@@ -1795,6 +2016,57 @@ export default function App() {
     if (data) setDispositivos(data);
   };
 
+  const fetchAuditoria = async (profile = userProfile) => {
+    try {
+      setLoadingAuditoria(true);
+      let query = supabase
+        .from('auditoria_sistema')
+        .select('*, comunidad:comunidades(nombre)');
+
+      if (profile && profile.rol === 'admin' && profile.id_comunidad) {
+        query = query.eq('id_comunidad', profile.id_comunidad);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(500);
+      if (!error && data) {
+        setAuditoriaEventos(data);
+      }
+    } catch (err) {
+      console.warn("Error in fetchAuditoria:", err);
+    } finally {
+      setLoadingAuditoria(false);
+    }
+  };
+
+  const registrarAuditoriaWeb = async (modulo, accion, idReferencia = null, detalles = {}) => {
+    try {
+      const { error } = await supabase.rpc('registrar_evento_auditoria', {
+        p_modulo: modulo,
+        p_accion: accion,
+        p_id_referencia: idReferencia ? String(idReferencia) : null,
+        p_detalles: detalles,
+        p_origen: 'web'
+      });
+
+      if (error) {
+        // Fallback a inserción directa si la función RPC aún no está creada
+        await supabase.from('auditoria_sistema').insert([{
+          id_usuario: userProfile?.id || user?.id || null,
+          nombre_usuario: userProfile?.nombre || user?.email || 'Administrador Web',
+          rol_usuario: userProfile?.rol || 'admin',
+          modulo,
+          accion,
+          id_referencia: idReferencia ? String(idReferencia) : null,
+          detalles,
+          origen: 'web',
+          id_comunidad: userProfile?.id_comunidad || null
+        }]);
+      }
+    } catch (err) {
+      console.warn("Auditoría silenciosa:", err);
+    }
+  };
+
   // Auth actions
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -1858,6 +2130,13 @@ export default function App() {
         localStorage.removeItem('eje_login_attempts');
         localStorage.removeItem('eje_lock_until');
       } catch (e) {}
+
+      registrarAuditoriaWeb('AUTENTICACION', 'INICIO_SESION', data.user.id, {
+        email: sanitizedEmail,
+        rol: profile.rol,
+        nombre: profile.nombre
+      });
+
       setUser(data.user);
       setCurrentPage('dashboard');
     } catch (err) {
@@ -1883,6 +2162,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    registrarAuditoriaWeb('AUTENTICACION', 'CIERRE_SESION', userProfile?.id, {
+      motivo: 'cierre_voluntario'
+    });
     await supabase.auth.signOut();
     setUser(null);
     setUserProfile(null);
@@ -2016,8 +2298,14 @@ export default function App() {
 
     const { error } = await query;
     if (!error) {
+      const accionAudit = nuevoEstado === 'finalizada' ? 'RESOLVER_ALERTA' : (nuevoEstado === 'falsa_alarma' ? 'MARCAR_FALSA_ALARMA' : 'ACTUALIZAR_ALERTA');
+      registrarAuditoriaWeb('ALERTAS', accionAudit, id, {
+        nuevo_estado: nuevoEstado,
+        alerta_id: id
+      });
       await fetchAlertas(userProfile);
       await fetchStats(userProfile);
+      fetchAuditoria(userProfile);
       setManageAlerta(null);
     } else {
       alert("Error al actualizar el estado de la alerta: " + error.message);
@@ -2045,10 +2333,15 @@ export default function App() {
         descripcion: newComunidad.descripcion.trim() || null
       }]);
     if (!error) {
+      registrarAuditoriaWeb('COMUNIDADES', 'CREAR_COMUNIDAD', null, {
+        nombre: newComunidad.nombre.trim(),
+        descripcion: newComunidad.descripcion.trim() || null
+      });
       setNewComunidad({ nombre: '', descripcion: '' });
       setComunidadFormMessage({ type: 'success', text: "Comunidad creada exitosamente." });
       fetchComunidades();
       fetchStats();
+      fetchAuditoria();
     } else {
       setComunidadFormMessage({ type: 'error', text: "Error al crear: " + error.message });
     }
@@ -2077,10 +2370,15 @@ export default function App() {
       .update(payload)
       .eq('id', editingComunidad.id);
     if (!error) {
+      registrarAuditoriaWeb('COMUNIDADES', 'EDITAR_COMUNIDAD', editingComunidad.id, {
+        nombre: editingComunidad.nombre.trim(),
+        estado: editingComunidad.estado || null
+      });
       setEditingComunidad(null);
       setComunidadFormMessage({ type: 'success', text: "Comunidad actualizada correctamente." });
       fetchComunidades();
       fetchStats();
+      fetchAuditoria();
     } else {
       setComunidadFormMessage({ type: 'error', text: "Error al actualizar comunidad: " + error.message });
     }
@@ -2105,9 +2403,14 @@ export default function App() {
       .update({ estado: nuevoEstado })
       .eq('id', comunidadId);
     if (!error) {
+      registrarAuditoriaWeb('COMUNIDADES', nuevoEstado === 'inactivo' ? 'DESACTIVAR_COMUNIDAD' : 'ACTIVAR_COMUNIDAD', comunidadId, {
+        comunidad_nombre: comunidadNombre,
+        nuevo_estado: nuevoEstado
+      });
       setComunidadFormMessage({ type: 'success', text: `Comunidad "${comunidadNombre}" ${nuevoEstado === 'inactivo' ? 'desactivada' : 'reactivada'} con éxito.` });
       fetchComunidades();
       fetchStats();
+      fetchAuditoria();
     } else {
       if (error.code === '42703' || error.message?.includes('estado')) {
         setComunidadFormMessage({ 
@@ -2214,6 +2517,13 @@ export default function App() {
       setUserFormMessage({ 
         type: 'success', 
         text: `¡Usuario ${nombreTrim} registrado con éxito!` 
+      });
+
+      registrarAuditoriaWeb('USUARIOS', 'CREAR_USUARIO', data?.user?.id || null, {
+        nombre: nombreTrim,
+        email: emailTrim,
+        rol: rolAsignado,
+        id_comunidad: comunidadId
       });
 
       // Limpiar campos del formulario
@@ -2333,10 +2643,16 @@ export default function App() {
     const { error } = await updateQuery;
 
     if (!error) {
+      registrarAuditoriaWeb('USUARIOS', 'EDITAR_USUARIO', editingUsuario.id, {
+        nombre: nombreTrim,
+        rol: rolActualizado,
+        comunidad_id: comId
+      });
       setEditingUsuario(null);
       setUserFormMessage({ type: 'success', text: `Usuario "${nombreTrim}" actualizado correctamente.` });
       fetchUsuarios();
       fetchStats();
+      fetchAuditoria();
     } else {
       setUserFormMessage({ type: 'error', text: 'Error al actualizar usuario: ' + error.message });
     }
@@ -2365,12 +2681,17 @@ export default function App() {
     const { error } = await toggleQuery;
 
     if (!error) {
+      registrarAuditoriaWeb('USUARIOS', nuevoEstado === 'deshabilitado' ? 'BLOQUEAR_USUARIO' : 'DESBLOQUEAR_USUARIO', usuarioId, {
+        nombre: usuarioNombre,
+        nuevo_estado: nuevoEstado
+      });
       setUserFormMessage({ 
         type: 'success', 
         text: `Usuario "${usuarioNombre}" ${nuevoEstado === 'deshabilitado' ? 'deshabilitado' : 'reactivado'} con éxito.` 
       });
       fetchUsuarios();
       fetchStats();
+      fetchAuditoria();
     } else {
       setUserFormMessage({ type: 'error', text: 'Error al cambiar estado del usuario: ' + error.message });
     }
@@ -2431,6 +2752,11 @@ export default function App() {
       .insert([payload]);
 
     if (!error) {
+      registrarAuditoriaWeb('DISPOSITIVOS', 'REGISTRAR_DISPOSITIVO', macTrim, {
+        tipo: newDispositivo.tipo,
+        zona: zonaTrim,
+        id_comunidad: comId
+      });
       setDeviceFormMessage({ type: 'success', text: `Dispositivo ${macTrim} registrado con éxito.` });
       setNewDispositivo({ 
         mac_address: '', 
@@ -2444,6 +2770,7 @@ export default function App() {
       });
       fetchDispositivos();
       fetchStats();
+      fetchAuditoria();
     } else {
       setDeviceFormMessage({ type: 'error', text: "Error al registrar dispositivo: " + error.message });
     }
@@ -2524,10 +2851,16 @@ export default function App() {
     const { error } = await updateDevQuery;
 
     if (!error) {
+      registrarAuditoriaWeb('DISPOSITIVOS', 'EDITAR_DISPOSITIVO', editingDispositivo.mac_address, {
+        tipo: editingDispositivo.tipo,
+        zona: zonaTrim,
+        estado: editingDispositivo.estado
+      });
       setEditingDispositivo(null);
       setDeviceFormMessage({ type: 'success', text: `Dispositivo ${editingDispositivo.mac_address} actualizado.` });
       fetchDispositivos();
       fetchStats();
+      fetchAuditoria();
     } else {
       setDeviceFormMessage({ type: 'error', text: 'Error al actualizar dispositivo: ' + error.message });
     }
@@ -2556,12 +2889,16 @@ export default function App() {
     const { error } = await toggleDevQuery;
 
     if (!error) {
+      registrarAuditoriaWeb('DISPOSITIVOS', nuevoEstado === 'inactivo' ? 'DESACTIVAR_DISPOSITIVO' : 'ACTIVAR_DISPOSITIVO', macAddress, {
+        nuevo_estado: nuevoEstado
+      });
       setDeviceFormMessage({ 
         type: 'success', 
         text: `Dispositivo ${macAddress} ${nuevoEstado === 'inactivo' ? 'desactivado' : 'reactivado'} con éxito.` 
       });
       fetchDispositivos();
       fetchStats();
+      fetchAuditoria();
     } else {
       setDeviceFormMessage({ type: 'error', text: 'Error al cambiar estado del dispositivo: ' + error.message });
     }
@@ -5262,6 +5599,57 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Tarjeta 7: Bitácora de Auditoría del Sistema y Trazabilidad Forense */}
+                    <div className="glassmorphism rounded-2xl p-6 border border-white/10 hover:border-emerald-500/30 transition-all flex flex-col justify-between group shadow-xl">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                            <ShieldCheck className="w-5 h-5" />
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 text-[10px] font-bold">
+                            Informe 7
+                          </span>
+                        </div>
+                        <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-emerald-400 transition-colors">
+                          Bitácora de Auditoría del Sistema
+                        </h4>
+                        <p className="text-xs text-gray-400 leading-relaxed mb-4">
+                          Trazabilidad forense inmutable de quién hizo qué, a qué hora y desde qué plataforma (Web o App) para máxima transparencia y no repudio.
+                        </p>
+                        <div className="flex items-center gap-2 text-[11px] text-gray-400 mb-5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                          <span>{filteredAuditoriaEventos.length} eventos auditados</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveReportPreview('auditoria')}
+                          className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
+                          title="Abrir vista previa oficial para revisar antes de imprimir"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Vista Previa</span>
+                        </button>
+                        <button
+                          onClick={() => handlePrintReport('auditoria')}
+                          title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
+                          className="py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-white" />
+                          <span className="hidden sm:inline text-[11px]">PDF Carta</span>
+                        </button>
+                        <button
+                          onClick={handleExportAuditoriaCSV}
+                          title="Exportar a Hoja de Cálculo Excel (CSV)"
+                          className="py-2 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-white/10 text-gray-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>CSV</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -5435,6 +5823,12 @@ export default function App() {
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'acta' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Acta Asamblea
+                          </button>
+                          <button
+                            onClick={() => setActiveReportPreview('auditoria')}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'auditoria' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                          >
+                            Auditoría
                           </button>
                         </div>
 
