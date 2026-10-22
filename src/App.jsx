@@ -46,7 +46,8 @@ import {
   Filter,
   Search,
   FileSpreadsheet,
-  Layers
+  Layers,
+  Laptop
 } from 'lucide-react';
 
 export default function App() {
@@ -178,6 +179,14 @@ export default function App() {
   const [reportStatusFilter, setReportStatusFilter] = useState('todos'); // 'todos', 'activa', 'finalizada', 'falsa_alarma'
   const [reportSearchTerm, setReportSearchTerm] = useState('');
   const [activeReportPreview, setActiveReportPreview] = useState(null); // 'bitacora', 'estadisticas', 'horaspico', 'padron', 'recurrentes', 'acta', 'auditoria'
+  
+  // Segmentación aislada para filtros de Auditoría Forense
+  const [reportFilterMode, setReportFilterMode] = useState('emergencias'); // 'emergencias' (Informes 1-6) | 'auditoria' (Informe 7)
+  const [reportAuditAccionFilter, setReportAuditAccionFilter] = useState('todos'); // 'todos', 'ATENCIONES', 'DISPAROS', 'USUARIOS', 'DISPOSITIVOS', 'TRAYECTOS', 'AUTENTICACION'
+  const [reportAuditOrigenFilter, setReportAuditOrigenFilter] = useState('todos'); // 'todos', 'web', 'app', 'sistema'
+  const [reportAuditSeverityFilter, setReportAuditSeverityFilter] = useState('todos'); // 'todos', 'critica', 'operativa', 'informativa'
+  const [reportAuditRolFilter, setReportAuditRolFilter] = useState('todos'); // 'todos', 'super_admin', 'admin', 'vecino'
+
   const [auditoriaEventos, setAuditoriaEventos] = useState([]);
   const [loadingAuditoria, setLoadingAuditoria] = useState(false);
 
@@ -467,7 +476,7 @@ export default function App() {
     };
   }, [filteredReportAlertas, filteredReportUsuarios]);
 
-  // Eventos de auditoría filtrados para el Informe 7
+  // Eventos de auditoría filtrados para el Informe 7 (Con filtros forenses y foco en atenciones)
   const filteredAuditoriaEventos = useMemo(() => {
     return auditoriaEventos.filter(evento => {
       // 1. Filtro por Comunidad y Rol
@@ -506,7 +515,44 @@ export default function App() {
         }
       }
 
-      // 3. Filtro por término de búsqueda (usuario, acción, módulo o ID ref)
+      // 3. Filtro Forense: Operación / Acción (CON ÉNFASIS PRIORITARIO EN ATENCIONES)
+      if (reportAuditAccionFilter === 'ATENCIONES') {
+        if (evento.accion !== 'RESOLVER_ALERTA' && evento.accion !== 'MARCAR_FALSA_ALARMA') return false;
+      } else if (reportAuditAccionFilter === 'DISPAROS') {
+        if (evento.accion !== 'CREAR_ALERTA') return false;
+      } else if (reportAuditAccionFilter === 'USUARIOS') {
+        if (evento.modulo !== 'USUARIOS') return false;
+      } else if (reportAuditAccionFilter === 'DISPOSITIVOS') {
+        if (evento.modulo !== 'DISPOSITIVOS') return false;
+      } else if (reportAuditAccionFilter === 'TRAYECTOS') {
+        if (evento.modulo !== 'TRAYECTOS') return false;
+      } else if (reportAuditAccionFilter === 'AUTENTICACION') {
+        if (evento.modulo !== 'AUTENTICACION') return false;
+      }
+
+      // 4. Filtro Forense: Plataforma / Origen (Web vs App)
+      if (reportAuditOrigenFilter !== 'todos') {
+        if ((evento.origen || '').toLowerCase() !== reportAuditOrigenFilter.toLowerCase()) return false;
+      }
+
+      // 5. Filtro Forense: Rol del Operador Responsable
+      if (reportAuditRolFilter !== 'todos') {
+        if ((evento.rol_usuario || '').toLowerCase() !== reportAuditRolFilter.toLowerCase()) return false;
+      }
+
+      // 6. Filtro Forense: Nivel de Criticidad / Riesgo
+      if (reportAuditSeverityFilter === 'critica') {
+        const criticas = ['CAMBIO_ROL', 'BLOQUEAR_USUARIO', 'DESACTIVAR_DISPOSITIVO', 'MARCAR_FALSA_ALARMA'];
+        if (!criticas.includes(evento.accion)) return false;
+      } else if (reportAuditSeverityFilter === 'operativa') {
+        const operativas = ['CREAR_ALERTA', 'RESOLVER_ALERTA', 'INICIAR_TRAYECTO', 'LLEGADA_CONFIRMADA'];
+        if (!operativas.includes(evento.accion)) return false;
+      } else if (reportAuditSeverityFilter === 'informativa') {
+        const informativas = ['INICIO_SESION', 'CIERRE_SESION', 'EXPORTAR_REPORTE', 'EXPORTAR_CSV'];
+        if (!informativas.includes(evento.accion)) return false;
+      }
+
+      // 7. Filtro por término de búsqueda (usuario, acción, módulo o ID ref)
       if (reportSearchTerm.trim()) {
         const term = reportSearchTerm.toLowerCase();
         const nom = (evento.nombre_usuario || '').toLowerCase();
@@ -521,7 +567,19 @@ export default function App() {
 
       return true;
     });
-  }, [auditoriaEventos, userProfile, reportCommunityId, reportDateRange, reportStartDate, reportEndDate, reportSearchTerm]);
+  }, [
+    auditoriaEventos,
+    userProfile,
+    reportCommunityId,
+    reportDateRange,
+    reportStartDate,
+    reportEndDate,
+    reportSearchTerm,
+    reportAuditAccionFilter,
+    reportAuditOrigenFilter,
+    reportAuditSeverityFilter,
+    reportAuditRolFilter
+  ]);
 
   // Exportación a Excel / CSV con soporte UTF-8 BOM
   const exportToCSV = (filename, headers, rows) => {
@@ -658,6 +716,30 @@ export default function App() {
     const emisorName = userProfile?.nombre || 'Administración Eje Urbano';
     const fechaEmision = new Date().toLocaleString();
     const certCode = `AUD-SEC-${Date.now().toString().slice(-6)}`;
+
+    // Parámetros legibles de filtros forenses para el Informe 7
+    const labelAuditAccion = 
+      reportAuditAccionFilter === 'ATENCIONES' ? 'Solo Atenciones de Alertas (Atendidas / Falsas)' :
+      reportAuditAccionFilter === 'DISPAROS' ? 'Solo Emisión de Alertas (Vecinos SOS/Robo)' :
+      reportAuditAccionFilter === 'USUARIOS' ? 'Gestión de Cuentas y Roles' :
+      reportAuditAccionFilter === 'DISPOSITIVOS' ? 'Dispositivos Comunitarios IoT' :
+      reportAuditAccionFilter === 'TRAYECTOS' ? 'Trayectos Acompáñame a Casa' :
+      reportAuditAccionFilter === 'AUTENTICACION' ? 'Sesiones (Login / Logout)' : 'Todas las Operaciones';
+
+    const labelAuditOrigen = 
+      reportAuditOrigenFilter === 'web' ? 'Consola Web Central (PC)' :
+      reportAuditOrigenFilter === 'app' ? 'App Móvil Vecinal (Android)' :
+      reportAuditOrigenFilter === 'sistema' ? 'Sistema / Automático' : 'Todas las Plataformas (Web + App)';
+
+    const labelAuditSeverity = 
+      reportAuditSeverityFilter === 'critica' ? 'Críticas / Sensibles' :
+      reportAuditSeverityFilter === 'operativa' ? 'Operativas / Modificaciones' :
+      reportAuditSeverityFilter === 'informativa' ? 'Informativas / Rutinarias' : 'Todas las Severidades';
+
+    const labelAuditRol = 
+      reportAuditRolFilter === 'super_admin' ? 'Super Administradores' :
+      reportAuditRolFilter === 'admin' ? 'Administradores Locales' :
+      reportAuditRolFilter === 'vecino' ? 'Vecinos' : 'Todos los Roles';
 
     let reportTitle = '';
     let scopeDesc = '';
@@ -1363,6 +1445,18 @@ export default function App() {
           <strong>${emisorName}</strong>
         </td>
       </tr>
+      ${reportKey === 'auditoria' ? `
+      <tr>
+        <td colspan="4" style="font-size:7.5pt; background:#f4f4f4; padding:5px 8px; border:1px solid #000;">
+          <strong>FILTROS FORENSES APLICADOS:</strong> 
+          Operación: <strong>${labelAuditAccion}</strong> &nbsp;|&nbsp; 
+          Plataforma: <strong>${labelAuditOrigen}</strong> &nbsp;|&nbsp; 
+          Criticidad: <strong>${labelAuditSeverity}</strong> &nbsp;|&nbsp; 
+          Rol: <strong>${labelAuditRol}</strong>
+          ${reportSearchTerm.trim() ? ` &nbsp;|&nbsp; Búsqueda: <em>"${reportSearchTerm.trim()}"</em>` : ''}
+        </td>
+      </tr>
+      ` : ''}
     </table>
 
     <div class="scope-box">
@@ -1461,7 +1555,12 @@ export default function App() {
     filteredReportUsuarios,
     filteredAuditoriaEventos,
     reportCalculatedStats,
-    reportRecurrentes
+    reportRecurrentes,
+    reportAuditAccionFilter,
+    reportAuditOrigenFilter,
+    reportAuditSeverityFilter,
+    reportAuditRolFilter,
+    reportSearchTerm
   ]);
 
   const mapIframeRef = useRef(null); // Referencia al iframe estático de mapa.html
@@ -3955,7 +4054,7 @@ export default function App() {
                   <BarChart3 className={`w-5 h-5 ${dashboardTab === 'reportes' ? 'text-[#00E5FF]' : 'text-purple-400'}`} />
                 </div>
                 <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
-                  <span>6 Informes</span>
+                  <span>7</span>
                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                     Activo
@@ -5055,21 +5154,24 @@ export default function App() {
                             Módulo Oficial Operativo
                           </span>
                           <span className="px-2.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-bold">
-                            6 Informes Disponibles
+                            7 Informes Oficiales (Incidencias + Auditoría)
                           </span>
                         </div>
                         <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
                           Centro de Reportes y Auditoría Vecinal
                         </h2>
                         <p className="text-gray-400 text-xs md:text-sm mt-1">
-                          Generación y descarga individual de informes ejecutivos, métricas estadísticas y padrón vecinal listos para imprimir y asambleas.
+                          Generación y descarga individual de informes ejecutivos, métricas estadísticas, padrón vecinal y bitácora de trazabilidad forense.
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0">
                       <button
-                        onClick={() => setActiveReportPreview('bitacora')}
+                        onClick={() => {
+                          setReportFilterMode('emergencias');
+                          setActiveReportPreview('bitacora');
+                        }}
                         className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-purple-500/25 flex items-center gap-2"
                       >
                         <Printer className="w-4 h-4" />
@@ -5081,11 +5183,43 @@ export default function App() {
 
                 {/* Barra de Filtros Inteligentes y Segmentación por Rol */}
                 <div className="glassmorphism rounded-2xl p-5 border border-white/10 space-y-4 shadow-xl">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                    <div className="flex items-center gap-2 text-white font-bold text-sm">
-                      <Filter className="w-4 h-4 text-[#00E5FF]" />
-                      <span>Filtros y Segmentación Institucional</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/5 pb-3 gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="flex items-center gap-1.5 text-white font-bold text-sm">
+                        <Filter className="w-4 h-4 text-[#00E5FF]" />
+                        <span>Filtros y Segmentación:</span>
+                      </div>
+
+                      {/* Selector de Modo Aislado: Emergencias vs Auditoría */}
+                      <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-white/10 text-xs shadow-inner">
+                        <button
+                          onClick={() => setReportFilterMode('emergencias')}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                            reportFilterMode === 'emergencias'
+                              ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-white font-bold shadow'
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                          title="Filtros especializados para Informes 1 al 6 (Emergencias e Incidentes)"
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Emergencias (Inf. 1-6)</span>
+                        </button>
+
+                        <button
+                          onClick={() => setReportFilterMode('auditoria')}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                            reportFilterMode === 'auditoria'
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold shadow'
+                              : 'text-gray-400 hover:text-white'
+                          }`}
+                          title="Filtros forenses para el Informe 7 (Bitácora de Auditoría del Sistema)"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Auditoría Forense (Inf. 7)</span>
+                        </button>
+                      </div>
                     </div>
+
                     <button
                       onClick={() => {
                         setReportDateRange('30d');
@@ -5094,11 +5228,16 @@ export default function App() {
                         setReportTypeFilter('todos');
                         setReportStatusFilter('todos');
                         setReportSearchTerm('');
+                        setReportAuditAccionFilter('todos');
+                        setReportAuditOrigenFilter('todos');
+                        setReportAuditSeverityFilter('todos');
+                        setReportAuditRolFilter('todos');
                         if (userProfile?.rol === 'super_admin') {
                           setReportCommunityId('todas');
                         }
                       }}
-                      className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                      className="text-xs text-gray-400 hover:text-white transition-colors flex items-center gap-1 self-end sm:self-auto"
+                      title="Restablecer todos los filtros a sus valores predeterminados"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>Restablecer Filtros</span>
@@ -5106,7 +5245,7 @@ export default function App() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* Filtro 1: Comunidad (Segmentación Estricta por Rol) */}
+                    {/* Filtro 1: Comunidad (Compartido) */}
                     <div>
                       <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
                         <Home className="w-3.5 h-3.5 text-[#00E5FF]" />
@@ -5138,7 +5277,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {/* Filtro 2: Período de Tiempo */}
+                    {/* Filtro 2: Período de Tiempo (Compartido) */}
                     <div>
                       <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-sky-400" />
@@ -5158,47 +5297,93 @@ export default function App() {
                       </select>
                     </div>
 
-                    {/* Filtro 3: Tipo de Emergencia (Excluye IoT y Acompáñame) */}
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Tipo de Emergencia</span>
-                      </label>
-                      <select
-                        value={reportTypeFilter}
-                        onChange={(e) => setReportTypeFilter(e.target.value)}
-                        className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
-                      >
-                        <option value="todos">Todas las Emergencias</option>
-                        <option value="ROBO">Robo / Intrusión</option>
-                        <option value="SOS">SOS / Pánico Vecinal</option>
-                        <option value="MEDICA">Emergencia Médica</option>
-                        <option value="INCENDIO">Incendio</option>
-                        <option value="DESASTRE">Desastre Natural</option>
-                      </select>
-                    </div>
+                    {/* Filtros 3 y 4: Dinámicos según el Modo */}
+                    {reportFilterMode === 'emergencias' ? (
+                      <>
+                        {/* Filtro 3: Tipo de Emergencia */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Tipo de Emergencia</span>
+                          </label>
+                          <select
+                            value={reportTypeFilter}
+                            onChange={(e) => setReportTypeFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                          >
+                            <option value="todos">Todas las Emergencias</option>
+                            <option value="ROBO">Robo / Intrusión</option>
+                            <option value="SOS">SOS / Pánico Vecinal</option>
+                            <option value="MEDICA">Emergencia Médica</option>
+                            <option value="INCENDIO">Incendio</option>
+                            <option value="DESASTRE">Desastre Natural</option>
+                          </select>
+                        </div>
 
-                    {/* Filtro 4: Estado de la Alerta */}
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Estado de Resolución</span>
-                      </label>
-                      <select
-                        value={reportStatusFilter}
-                        onChange={(e) => setReportStatusFilter(e.target.value)}
-                        className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
-                      >
-                        <option value="todos">Todos los Estados</option>
-                        <option value="activa">En Curso (Activas)</option>
-                        <option value="finalizada">Atendidas / Finalizadas</option>
-                        <option value="falsa_alarma">Falsa Alarma</option>
-                      </select>
-                    </div>
+                        {/* Filtro 4: Estado de la Alerta */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-300 mb-1.5 flex items-center gap-1.5">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Estado de Resolución</span>
+                          </label>
+                          <select
+                            value={reportStatusFilter}
+                            onChange={(e) => setReportStatusFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#00E5FF] transition-all cursor-pointer"
+                          >
+                            <option value="todos">Todos los Estados</option>
+                            <option value="activa">En Curso (Activas)</option>
+                            <option value="finalizada">Atendidas / Finalizadas</option>
+                            <option value="falsa_alarma">Falsa Alarma</option>
+                          </select>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Filtro 3 Forense: Operación Auditada (CON ÉNFASIS EN ATENCIONES) */}
+                        <div>
+                          <label className="block text-xs font-semibold text-emerald-300 mb-1.5 flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Operación Forense</span>
+                          </label>
+                          <select
+                            value={reportAuditAccionFilter}
+                            onChange={(e) => setReportAuditAccionFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs text-emerald-200 focus:outline-none focus:border-emerald-400 transition-all cursor-pointer shadow-sm"
+                          >
+                            <option value="todos">Todas las Operaciones</option>
+                            <option value="ATENCIONES">🚨 Solo Atenciones de Alertas (Atendidas / Falsas)</option>
+                            <option value="DISPAROS">📢 Solo Emisión de Alertas (Vecinos SOS/Robo)</option>
+                            <option value="USUARIOS">👥 Gestión de Cuentas y Roles</option>
+                            <option value="DISPOSITIVOS">📡 Dispositivos Comunitarios IoT</option>
+                            <option value="TRAYECTOS">🚶 Trayectos Acompáñame a Casa</option>
+                            <option value="AUTENTICACION">🔐 Sesiones (Login / Logout)</option>
+                          </select>
+                        </div>
+
+                        {/* Filtro 4 Forense: Plataforma / Origen */}
+                        <div>
+                          <label className="block text-xs font-semibold text-emerald-300 mb-1.5 flex items-center gap-1.5">
+                            <Laptop className="w-3.5 h-3.5 text-sky-400" />
+                            <span>Plataforma / Origen</span>
+                          </label>
+                          <select
+                            value={reportAuditOrigenFilter}
+                            onChange={(e) => setReportAuditOrigenFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs text-emerald-200 focus:outline-none focus:border-emerald-400 transition-all cursor-pointer shadow-sm"
+                          >
+                            <option value="todos">Todas las Plataformas (Web + App)</option>
+                            <option value="web">💻 Consola Web Central (PC)</option>
+                            <option value="app">📱 App Móvil Vecinal (Android)</option>
+                            <option value="sistema">⚙️ Sistema / Automático</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* Campos adicionales si es rango personalizado y buscador */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-white/5">
+                  {/* Fila Inferior: Rango Personalizado, Criticidad, Rol y Buscador */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 border-t border-white/5">
                     {reportDateRange === 'personalizado' && (
                       <>
                         <div>
@@ -5222,14 +5407,57 @@ export default function App() {
                       </>
                     )}
 
-                    <div className={reportDateRange === 'personalizado' ? 'sm:col-span-1' : 'sm:col-span-3'}>
-                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">Buscar por vecino, ID o dirección:</label>
+                    {reportFilterMode === 'auditoria' && (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-400 mb-1">Nivel de Criticidad:</label>
+                          <select
+                            value={reportAuditSeverityFilter}
+                            onChange={(e) => setReportAuditSeverityFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-400"
+                          >
+                            <option value="todos">Todas las Severidades</option>
+                            <option value="critica">🔴 Críticas / Sensibles</option>
+                            <option value="operativa">🟡 Operativas / Modificaciones</option>
+                            <option value="informativa">🟢 Informativas / Rutinarias</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-400 mb-1">Rol del Responsable:</label>
+                          <select
+                            value={reportAuditRolFilter}
+                            onChange={(e) => setReportAuditRolFilter(e.target.value)}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-400"
+                          >
+                            <option value="todos">Todos los Roles</option>
+                            <option value="super_admin">Super Administradores</option>
+                            <option value="admin">Administradores Locales</option>
+                            <option value="vecino">Vecinos</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
+
+                    <div className={
+                      reportDateRange === 'personalizado' || reportFilterMode === 'auditoria'
+                        ? 'sm:col-span-2 lg:col-span-2'
+                        : 'sm:col-span-2 lg:col-span-4'
+                    }>
+                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                        {reportFilterMode === 'auditoria'
+                          ? 'Buscar por usuario, acción, módulo o ID ref:'
+                          : 'Buscar por vecino, ID o dirección:'}
+                      </label>
                       <div className="relative">
                         <input
                           type="text"
                           value={reportSearchTerm}
                           onChange={(e) => setReportSearchTerm(e.target.value)}
-                          placeholder="Ej. Juan Pérez, ID 15, Los Olivos..."
+                          placeholder={
+                            reportFilterMode === 'auditoria'
+                              ? 'Ej. Juan Pérez, RESOLVER_ALERTA, #12, web...'
+                              : 'Ej. Juan Pérez, ID 15, Los Olivos...'
+                          }
                           className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#00E5FF]"
                         />
                         <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
@@ -5313,7 +5541,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Catálogo de los 6 Informes Vecinales Oficiales con Descarga Individual */}
+                {/* Catálogo de los 7 Informes Oficiales (Vecinales y Auditoría) con Descarga Individual */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
@@ -5625,7 +5853,10 @@ export default function App() {
 
                       <div className="flex items-center gap-2 pt-3 border-t border-white/5">
                         <button
-                          onClick={() => setActiveReportPreview('auditoria')}
+                          onClick={() => {
+                            setReportFilterMode('auditoria');
+                            setActiveReportPreview('auditoria');
+                          }}
                           className="flex-1 py-2 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md"
                           title="Abrir vista previa oficial para revisar antes de imprimir"
                         >
@@ -5633,7 +5864,10 @@ export default function App() {
                           <span>Vista Previa</span>
                         </button>
                         <button
-                          onClick={() => handlePrintReport('auditoria')}
+                          onClick={() => {
+                            setReportFilterMode('auditoria');
+                            handlePrintReport('auditoria');
+                          }}
                           title="Imprimir o Guardar en PDF directamente (Tamaño Carta - Blanco y Negro)"
                           className="py-2 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold transition-all flex items-center gap-1"
                         >
@@ -5789,44 +6023,65 @@ export default function App() {
                         {/* Tabs de Selección Rápida en el Modal */}
                         <div className="flex items-center overflow-x-auto max-w-full bg-slate-900/90 rounded-xl p-1 border border-white/10 text-xs gap-1">
                           <button
-                            onClick={() => setActiveReportPreview('bitacora')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('bitacora');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'bitacora' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Bitácora
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('estadisticas')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('estadisticas');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'estadisticas' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Estadísticas
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('horaspico')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('horaspico');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'horaspico' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Horas Pico
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('padron')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('padron');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'padron' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Padrón
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('recurrentes')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('recurrentes');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'recurrentes' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Recurrentes
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('acta')}
+                            onClick={() => {
+                              setReportFilterMode('emergencias');
+                              setActiveReportPreview('acta');
+                            }}
                             className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'acta' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Acta Asamblea
                           </button>
                           <button
-                            onClick={() => setActiveReportPreview('auditoria')}
-                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'auditoria' ? 'bg-white text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
+                            onClick={() => {
+                              setReportFilterMode('auditoria');
+                              setActiveReportPreview('auditoria');
+                            }}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${activeReportPreview === 'auditoria' ? 'bg-emerald-400 text-slate-950 font-bold shadow' : 'text-gray-400 hover:text-white'}`}
                           >
                             Auditoría
                           </button>
@@ -5850,11 +6105,67 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Barra de Filtros Forenses Rápidos en Pantalla de Auditoría */}
+                      {activeReportPreview === 'auditoria' && (
+                        <div className="no-print px-4 py-2.5 bg-slate-900 border-b border-emerald-500/20 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+                          <div className="flex flex-wrap items-center gap-2.5">
+                            <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                              <ShieldCheck className="w-4 h-4" />
+                              <span>Filtros Forenses Rápidos:</span>
+                            </span>
+
+                            {/* Selector Rápido de Operación con Foco en Atenciones */}
+                            <select
+                              value={reportAuditAccionFilter}
+                              onChange={(e) => setReportAuditAccionFilter(e.target.value)}
+                              className="bg-slate-950 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-emerald-200 text-xs focus:outline-none focus:border-emerald-400 cursor-pointer shadow-sm"
+                            >
+                              <option value="todos">Todas las Operaciones</option>
+                              <option value="ATENCIONES">🚨 Solo Atenciones de Alertas (Atendidas / Falsas)</option>
+                              <option value="DISPAROS">📢 Solo Emisión de Alertas (Vecinos SOS/Robo)</option>
+                              <option value="USUARIOS">👥 Gestión de Cuentas y Roles</option>
+                              <option value="DISPOSITIVOS">📡 Dispositivos Comunitarios IoT</option>
+                              <option value="TRAYECTOS">🚶 Trayectos Acompáñame a Casa</option>
+                              <option value="AUTENTICACION">🔐 Sesiones (Login / Logout)</option>
+                            </select>
+
+                            {/* Selector Rápido de Plataforma */}
+                            <select
+                              value={reportAuditOrigenFilter}
+                              onChange={(e) => setReportAuditOrigenFilter(e.target.value)}
+                              className="bg-slate-950 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-emerald-200 text-xs focus:outline-none focus:border-emerald-400 cursor-pointer shadow-sm"
+                            >
+                              <option value="todos">Todas las Plataformas (Web + App)</option>
+                              <option value="web">💻 Consola Web Central (PC)</option>
+                              <option value="app">📱 App Móvil Vecinal (Android)</option>
+                              <option value="sistema">⚙️ Sistema / Automático</option>
+                            </select>
+
+                            {/* Selector Rápido de Criticidad */}
+                            <select
+                              value={reportAuditSeverityFilter}
+                              onChange={(e) => setReportAuditSeverityFilter(e.target.value)}
+                              className="bg-slate-950 border border-emerald-500/40 rounded-lg px-2.5 py-1 text-emerald-200 text-xs focus:outline-none focus:border-emerald-400 cursor-pointer shadow-sm"
+                            >
+                              <option value="todos">Todas las Severidades</option>
+                              <option value="critica">🔴 Críticas / Sensibles</option>
+                              <option value="operativa">🟡 Operativas / Modificaciones</option>
+                              <option value="informativa">🟢 Informativas / Rutinarias</option>
+                            </select>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-gray-400 text-[11px]">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>Mostrando <strong className="text-white font-mono">{filteredAuditoriaEventos.length}</strong> eventos auditados</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* VISOR DOCUMENTAL 100% IDÉNTICO AL PDF GENERADO */}
                       <div className="flex-1 overflow-hidden p-2 sm:p-4 bg-slate-900/90 flex justify-center items-center">
                         <div className="w-full max-w-5xl h-full bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700/50 flex flex-col">
                           <iframe
-                            key={activeReportPreview}
+                            key={`${activeReportPreview}-${reportAuditAccionFilter}-${reportAuditOrigenFilter}-${reportAuditSeverityFilter}-${reportAuditRolFilter}-${reportCommunityId}-${reportDateRange}-${reportSearchTerm}`}
                             title="Vista Previa Oficial PDF"
                             srcDoc={previewReportHTML}
                             className="w-full h-full border-0 bg-white"
