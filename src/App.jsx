@@ -5154,7 +5154,7 @@ export default function App() {
                             Módulo Oficial Operativo
                           </span>
                           <span className="px-2.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-bold">
-                            7 Informes Oficiales (Incidencias + Auditoría)
+                            Incidencias + Auditoría
                           </span>
                         </div>
                         <h2 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
