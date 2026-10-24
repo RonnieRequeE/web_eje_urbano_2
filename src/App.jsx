@@ -47,8 +47,10 @@ import {
   Search,
   FileSpreadsheet,
   Layers,
-  Laptop
+  Laptop,
+  MessageSquare
 } from 'lucide-react';
+import ChatComunitario from './components/ChatComunitario';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('home'); // 'home', 'features', 'manual', 'iot', 'download', 'dashboard'
@@ -210,6 +212,134 @@ export default function App() {
     const found = comunidades.find(c => String(c.id) === String(reportCommunityId));
     return found ? found.nombre : 'Comunidad Seleccionada';
   }, [userProfile, reportCommunityId, comunidades]);
+
+  // --- Estados para Chat Comunitario y Conteo de Mensajes No Leídos ---
+  const [chatCommunityId, setChatCommunityId] = useState('');
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  // Sincronizar comunidad de chat según rol (priorizando Comunidad General en primer lugar para super_admin)
+  useEffect(() => {
+    if (userProfile?.rol === 'admin' && userProfile?.id_comunidad) {
+      setChatCommunityId(String(userProfile.id_comunidad));
+    } else if (userProfile?.rol === 'super_admin' || userProfile?.rol === 'superadmin') {
+      setChatCommunityId(prev => {
+        if (prev && comunidades.some(c => String(c.id) === String(prev))) {
+          return prev;
+        }
+        const general = comunidades.find(c => {
+          const name = (c.nombre || '').toLowerCase().trim();
+          return name === 'comunidad general' || name.includes('general') || String(c.id) === '1';
+        });
+        if (general) return String(general.id);
+        return comunidades.length > 0 ? String(comunidades[0].id) : '';
+      });
+    }
+  }, [userProfile, comunidades]);
+
+  // Lista ordenada de comunidades para chat: Comunidad General en primer lugar
+  const sortedChatComunidades = useMemo(() => {
+    if (!comunidades || comunidades.length === 0) return [];
+    const generalList = [];
+    const othersList = [];
+    comunidades.forEach(c => {
+      const name = (c.nombre || '').toLowerCase().trim();
+      if (name === 'comunidad general' || name.includes('general') || String(c.id) === '1') {
+        generalList.push(c);
+      } else {
+        othersList.push(c);
+      }
+    });
+    return [...generalList, ...othersList];
+  }, [comunidades]);
+
+  // Nombre legible de la comunidad seleccionada para el chat
+  const currentChatCommunityName = useMemo(() => {
+    if (userProfile?.rol === 'admin') {
+      return userProfile?.nombre_comunidad || 'Comunidad Asignada';
+    }
+    const found = comunidades.find(c => String(c.id) === String(chatCommunityId));
+    return found ? found.nombre : (comunidades[0]?.nombre || 'Sin comunidad');
+  }, [userProfile, chatCommunityId, comunidades]);
+
+  // Marcar como leídos para una comunidad
+  const markChatAsRead = (commId) => {
+    if (!commId || !user?.id) return;
+    try {
+      localStorage.setItem(`chat_last_read_${user.id}_${commId}`, new Date().toISOString());
+      setUnreadChatCount(0);
+    } catch (e) {
+      console.error('Error al guardar timestamp de lectura de chat:', e);
+    }
+  };
+
+  // Consultar mensajes no leídos para la comunidad seleccionada
+  const fetchUnreadChatCount = async (commId) => {
+    if (!commId || !user?.id) {
+      setUnreadChatCount(0);
+      return;
+    }
+    try {
+      const key = `chat_last_read_${user.id}_${commId}`;
+      const lastRead = localStorage.getItem(key);
+
+      let query = supabase
+        .from('mensajes')
+        .select('id, created_at', { count: 'exact', head: true })
+        .eq('id_comunidad', Number(commId))
+        .neq('user_id', user.id);
+
+      if (lastRead) {
+        query = query.gt('created_at', lastRead);
+      } else {
+        // Si nunca ha entrado, contar mensajes recientes de las últimas 24 horas
+        const fallbackSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        query = query.gt('created_at', fallbackSince);
+      }
+
+      const { count, error } = await query;
+      if (!error && typeof count === 'number') {
+        setUnreadChatCount(count);
+      }
+    } catch (err) {
+      console.error('Error al consultar mensajes no leídos del chat:', err);
+    }
+  };
+
+  // Marcar automáticamente como leídos al estar en la pestaña de chat
+  useEffect(() => {
+    if (dashboardTab === 'chat' && chatCommunityId) {
+      markChatAsRead(chatCommunityId);
+    }
+  }, [dashboardTab, chatCommunityId]);
+
+  // Suscripción Realtime para actualizar contador de no leídos en vivo
+  useEffect(() => {
+    if (!chatCommunityId || !user?.id) return;
+
+    fetchUnreadChatCount(chatCommunityId);
+
+    const chatSub = supabase
+      .channel(`realtime_chat_counter_${chatCommunityId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'mensajes',
+        filter: `id_comunidad=eq.${chatCommunityId}`
+      }, (payload) => {
+        if (payload.new && payload.new.user_id !== user.id) {
+          if (dashboardTab === 'chat') {
+            markChatAsRead(chatCommunityId);
+          } else {
+            setUnreadChatCount(prev => prev + 1);
+          }
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(chatSub);
+    };
+  }, [chatCommunityId, user?.id, dashboardTab]);
 
   // Etiqueta legible del rango de fechas
   const reportDateRangeLabel = useMemo(() => {
@@ -3949,7 +4079,7 @@ export default function App() {
             </div>
 
             {/* Stats Overview (Funciona ahora como el selector de pestañas) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-5 mb-10">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5 mb-10">
               <div 
                 onClick={() => setDashboardTab('alertas')}
                 className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
@@ -4062,6 +4192,54 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-gray-400 mt-2">Auditoría vecinal y descargas PDF</p>
                 {dashboardTab === 'reportes' && (
+                  <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
+                  </div>
+                )}
+              </div>
+
+              <div 
+                onClick={() => setDashboardTab('chat')}
+                className={`p-6 rounded-2xl glass-card transition-all cursor-pointer ${
+                  dashboardTab === 'chat' 
+                    ? 'glass-card-active ring-2 ring-[#00E5FF] border-2 border-[#00E5FF]' 
+                    : 'border border-white/5 opacity-80 hover:opacity-100'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <span className={`text-sm font-semibold ${dashboardTab === 'chat' ? 'text-[#00E5FF]' : 'text-gray-400'}`}>Chat Comunitario</span>
+                  <div className="flex items-center gap-2">
+                    {unreadChatCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30 flex items-center gap-1 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                        {unreadChatCount} {unreadChatCount === 1 ? 'nuevo' : 'nuevos'}
+                      </span>
+                    )}
+                    <MessageSquare className={`w-5 h-5 ${dashboardTab === 'chat' ? 'text-[#00E5FF]' : 'text-indigo-400'}`} />
+                  </div>
+                </div>
+                <h3 className="text-4xl font-extrabold text-white flex items-center justify-between">
+                  <div className="flex items-baseline gap-2">
+                    <span className={unreadChatCount > 0 ? "text-amber-400 font-black" : "text-white font-extrabold"}>
+                      {unreadChatCount}
+                    </span>
+                    <span className="text-xs font-semibold text-gray-400 tracking-normal">
+                      {unreadChatCount === 1 ? 'no leído' : 'no leídos'}
+                    </span>
+                  </div>
+                  {unreadChatCount > 0 ? (
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" title="Mensajes sin leer"></span>
+                  ) : (
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" title="Al día"></span>
+                  )}
+                </h3>
+                <p className="text-xs text-gray-400 mt-2 flex items-center justify-between">
+                  <span className="truncate max-w-[220px] text-gray-300 font-medium flex items-center gap-1" title={currentChatCommunityName}>
+                    🏘️ {currentChatCommunityName}
+                  </span>
+                  <span className="text-[11px] text-gray-500">Tiempo real</span>
+                </p>
+                {dashboardTab === 'chat' && (
                   <div className="mt-3 pt-2 border-t border-[#00E5FF]/20 flex items-center gap-1.5 text-[11px] font-bold text-[#00E5FF]">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF] animate-pulse"></span> Seleccionado
                   </div>
@@ -6178,6 +6356,21 @@ export default function App() {
                 )}
 
               </div>
+            )}
+
+            {/* Tab content 6: Chat Comunitario en Vivo */}
+            {dashboardTab === 'chat' && (
+              <ChatComunitario
+                user={user}
+                userProfile={userProfile}
+                comunidades={comunidades}
+                selectedCommunityId={chatCommunityId}
+                onSelectCommunity={(newId) => {
+                  setChatCommunityId(newId);
+                  markChatAsRead(newId);
+                }}
+                onMarkAsRead={markChatAsRead}
+              />
             )}
           </section>
         )}
