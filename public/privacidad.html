@@ -129,7 +129,7 @@
     <header>
       <span class="badge">Eje Urbano - Seguridad Comunitaria</span>
       <h1>Política de Privacidad</h1>
-      <p class="update-date">Última actualización: 24 de octubre de 2026</p>
+      <p class="update-date">Última actualización: 6 de noviembre de 2026</p>
     </header>
 
     <section>
@@ -157,12 +157,13 @@
       <h3>B. Datos de Ubicación Geográfica (GPS)</h3>
       <div class="alert-box">
         <strong>Declaración Destacada sobre Ubicación en Primer y Segundo Plano:</strong><br>
-        <strong>Eje Urbano</strong> recopila datos de ubicación precisa (GPS) para habilitar las funciones centrales de seguridad:
+        <strong>Eje Urbano</strong> recopila datos de ubicación precisa (GPS) para habilitar las funciones centrales de auxilio y seguridad:
         <ul style="margin-top: 8px; margin-bottom: 0;">
-          <li><strong>Alertas de Emergencia (SOS, Robo, Médica):</strong> Permite fijar con precisión la escena del incidente en el mapa comunitario para el auxilio de los vecinos y autoridades.</li>
-          <li><strong>Función "Acompáñame a Casa":</strong> Recopila datos de ubicación en tiempo real en segundo plano (incluso cuando la app está minimizada o la pantalla apagada) mediante un servicio en primer plano persistente (<em>Foreground Service</em>) con notificación activa, <strong>únicamente mientras el usuario mantenga activo voluntariamente el temporizador de trayecto</strong>.</li>
+          <li><strong>Alertas de Emergencia Dinámicas (SOS y Robo):</strong> Al activarse una alerta de SOS o ROBO, la aplicación activa un servicio en primer plano persistente (<em>Foreground Service</em>) con notificación visible que continúa transmitiendo la ubicación geográfica en tiempo real en segundo plano (incluso cuando la app está minimizada o la pantalla apagada). Esto permite que los administradores y vecinos visualicen la trayectoria de escape o movimiento de la víctima en el mapa en vivo para coordinar el rescate inmediato, hasta que la alerta sea formalmente atendida o resuelta.</li>
+          <li><strong>Función "Acompáñame a Casa":</strong> Recopila datos de ubicación en tiempo real en segundo plano mediante un servicio en primer plano persistente (<em>Foreground Service</em>) con notificación continua activa, <strong>únicamente mientras el usuario mantenga activo voluntariamente el temporizador de su trayecto</strong>, compartiendo su ruta exclusivamente con los miembros de su Círculo de Confianza.</li>
+          <li><strong>Alertas de Ubicación Fija (Médica, Incendio, Desastre Natural):</strong> Capturan y fijan la coordenada geográfica exacta de la escena del incidente en el momento de la emisión.</li>
         </ul>
-        <em>La app NO rastrea pasivamente su ubicación cuando no hay una alerta emitida o un trayecto activo iniciado por usted.</em>
+        <p style="margin-top: 10px; margin-bottom: 0;"><em>La aplicación NUNCA rastrea pasivamente la ubicación del usuario si no existe una alerta activa emitida o un trayecto de acompañamiento iniciado voluntariamente.</em></p>
       </div>
 
       <h3>C. Información del Dispositivo y Notificaciones</h3>
@@ -176,7 +177,7 @@
       <h2>3. Finalidad del Uso de los Datos</h2>
       <p>Utilizamos la información recopilada exclusivamente para:</p>
       <ul>
-        <li>Transmitir avisos de auxilio y geolocalización inmediata a los vecinos y administradores de la comunidad correspondiente.</li>
+        <li>Transmitir avisos de auxilio y geolocalización inmediata, tanto fija como en desplazamiento en tiempo real (en alertas de SOS y Robo), a los vecinos y administradores de la comunidad para la atención y rescate oportuno.</li>
         <li>Transmitir la posición en vivo exclusivamente a los miembros designados de su <strong>Círculo de Confianza</strong> durante la función <em>Acompáñame a Casa</em>.</li>
         <li>Activar sirenas comunitarias o dispositivos físicos autorizados mediante protocolos seguros (MQTT).</li>
         <li>Garantizar la trazabilidad y auditoría de eventos de seguridad dentro del panel comunitario.</li>
